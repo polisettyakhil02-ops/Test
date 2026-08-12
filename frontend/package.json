@@ -1,0 +1,14 @@
+{
+  "name": "ask-the-erp-frontend",
+  "version": "1.0.0",
+  "description": "Ask the ERP frontend - static HTML/JS, no build step. Talks to the backend API via config.js.",
+  "private": true,
+  "scripts": {
+    "start": "node serve.js",
+    "dev": "node --watch serve.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

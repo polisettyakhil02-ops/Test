@@ -153,7 +153,7 @@
 <div class="wrap">
   <div class="banner">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-    <span><b>Live</b> — this talks to a real backend (see <code>/api/ask/*</code>) with fuzzy nearest-match entity resolution and a persisted in-memory store. It's a reference implementation of the spec, not hardened for untrusted public traffic - see README before exposing it beyond your own team.</span>
+    <span><b>Live</b> — this talks to a real backend API with fuzzy nearest-match entity resolution and a persisted store. Backend URL is set in <code>config.js</code>. It's a reference implementation of the spec, not hardened for untrusted public traffic - see README before exposing it beyond your own team.</span>
   </div>
 
   <h1>Ask the ERP</h1>
@@ -174,6 +174,7 @@
   <div class="result-area" id="result-area"></div>
 </div>
 
+<script src="config.js"></script>
 <script>
 (function () {
   "use strict";
@@ -215,8 +216,10 @@
     return icons[name] || "";
   }
 
+  const API_BASE = window.ASK_ERP_API_BASE || "";
+
   async function api(path, body) {
-    const res = await fetch(path, {
+    const res = await fetch(API_BASE + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),

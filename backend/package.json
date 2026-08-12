@@ -1,7 +1,7 @@
 {
-  "name": "ask-the-erp",
+  "name": "ask-the-erp-backend",
   "version": "1.0.0",
-  "description": "Natural-language search and action assistant for a school ERP - fuzzy entity resolution, disambiguation, and confirm-before-execute workflow.",
+  "description": "Ask the ERP API - natural-language search and action assistant for a school ERP. Fuzzy entity resolution, disambiguation, and confirm-before-execute workflow.",
   "type": "commonjs",
   "main": "src/index.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^4.19.2"
   },
   "license": "MIT"
