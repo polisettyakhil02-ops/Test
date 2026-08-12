@@ -38,7 +38,7 @@ Open http://localhost:5173. The frontend's `config.js` already points at
 tighten it before deploying either piece publicly (see below).
 
 ```bash
-cd backend && npm test    # 37 tests: fuzzy matcher, intent parser, full API flows
+cd backend && npm test    # 51 tests: fuzzy matcher, intent parser, LLM mapping, full API flows
 ```
 
 ## How it works
@@ -62,6 +62,14 @@ Entity resolution (matching "Ravi Kumr" to the real student "Ravi Kumar", or
 matching in `backend/src/lib/fuzzy.js` — see the spec's section 3 for why
 plain Levenshtein isn't the right choice here and what the distance-budget
 calibration is protecting against.
+
+Query parsing itself (deciding *which* of the 9 actions a sentence means) is
+pluggable: a free rule-based parser by default, or a real LLM call (Claude)
+if you set `INTENT_ENGINE=llm` and `ANTHROPIC_API_KEY` — see
+`backend/README.md` "LLM-backed parsing". Either way, entity resolution
+against real records goes through the same fuzzy matcher above, so
+disambiguation and confirmation behave identically regardless of which
+engine parsed the sentence.
 
 ## Deploying backend and frontend separately
 

@@ -2,7 +2,7 @@
 
 const express = require("express");
 const store = require("../lib/store");
-const { interpret } = require("../lib/intent");
+const { interpret } = require("../lib/intentEngine");
 const { resolve, runSearch } = require("../lib/resolve");
 const { confirm, ActionError } = require("../lib/actions");
 const { BRANCHES, TICKET_PAGES, BUS_ROUTES } = require("../data/seed");
@@ -24,7 +24,9 @@ function badRequest(res, message) {
 }
 
 // POST /api/ask/interpret - Tier 1 only. No DB access, no side effects.
-router.post("/interpret", (req, res) => {
+// Async because the LLM engine (see lib/intentEngine.js) makes a network
+// call; the rule-based engine resolves synchronously either way.
+router.post("/interpret", async (req, res, next) => {
   const query = req.body && req.body.query;
   if (typeof query !== "string" || !query.trim()) {
     return badRequest(res, "query is required");
@@ -32,9 +34,13 @@ router.post("/interpret", (req, res) => {
   if (query.length > 300) {
     return badRequest(res, "query is too long (max 300 characters)");
   }
-  const intent = interpret(query.trim(), candidateLists());
-  store.appendAudit({ event: "interpret", query, intent });
-  res.json(intent);
+  try {
+    const intent = await interpret(query.trim(), candidateLists());
+    store.appendAudit({ event: "interpret", query, intent });
+    res.json(intent);
+  } catch (err) {
+    next(err);
+  }
 });
 
 // POST /api/ask/resolve - Tier 2. Read-only; runs search directly, or returns

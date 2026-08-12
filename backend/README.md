@@ -14,7 +14,7 @@ npm start        # listens on PORT (default 3000)
 ```
 
 ```bash
-npm test          # 37 tests
+npm test          # 51 tests (3 skipped unless ANTHROPIC_API_KEY is set - see below)
 npm run dev        # auto-restart on file changes
 ```
 
@@ -39,18 +39,59 @@ frontend's URL (defaults to `*`, fine for local dev, not for production - see
 ```
 src/
   lib/
-    fuzzy.js     Tier 2 matching primitives (edit distance, tokenizer, nearest-match)
-    intent.js    Tier 1 parser: query -> structured intent
-    resolve.js   candidate resolution/disambiguation + read-only search
-    actions.js   confirm-time executors (the only code that mutates the store)
-    store.js     in-memory state + JSON-file persistence + audit log
-    rateLimit.js minimal per-IP rate limiter
-  routes/        Express routers (ask.js, approvals.js)
-  data/seed.js   starting fixture data
-  server.js      Express app (exported, not started - see index.js)
-  index.js       entrypoint: creates the app and listens
-test/            unit tests (fuzzy, intent, rate limiter) + full API integration tests
-data/            runtime state lives here (store.json, audit.log) - gitignored
+    fuzzy.js        Tier 2 matching primitives (edit distance, tokenizer, nearest-match)
+    intent.js       Tier 1 parser (rule-based): query -> structured intent
+    llmIntent.js    Tier 1 parser (LLM-backed, optional): same job, via Claude
+    intentEngine.js picks rule-based vs LLM per INTENT_ENGINE, with fallback
+    resolve.js      candidate resolution/disambiguation + read-only search
+    actions.js      confirm-time executors (the only code that mutates the store)
+    store.js        in-memory state + JSON-file persistence + audit log
+    rateLimit.js    minimal per-IP rate limiter
+  routes/           Express routers (ask.js, approvals.js)
+  data/seed.js      starting fixture data
+  server.js         Express app (exported, not started - see index.js)
+  index.js          entrypoint: creates the app and listens
+test/               unit tests (fuzzy, intent, llmIntent, rate limiter) + full API integration tests
+data/               runtime state lives here (store.json, audit.log) - gitignored
+```
+
+## LLM-backed parsing (optional)
+
+By default, `POST /api/ask/interpret` uses the rule-based parser in
+`src/lib/intent.js` - free, no network call, no API key. Set these to route
+it through Claude instead:
+
+```bash
+INTENT_ENGINE=llm
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001   # optional, this is the default
+```
+
+What changes and what doesn't:
+
+- **Only Tier 1 (action + slot extraction) changes.** The LLM never sees or
+  resolves actual student/branch/route names - it extracts them as raw text,
+  exactly as typed, and the same fuzzy matcher in `fuzzy.js` resolves that
+  raw text against real records either way. Disambiguation, confirmation, and
+  every write action work identically regardless of which engine parsed the
+  query.
+- **`reason` extraction is the one place the LLM is trusted with more
+  judgment** than the regex-based parser: it can find a stated reason without
+  requiring the literal word "because". The system prompt in `llmIntent.js`
+  explicitly instructs it to return `null` rather than invent one - review
+  `data/audit.log` periodically if this matters for your use case.
+- **Any failure falls back automatically** - missing key, network error,
+  8-second timeout, malformed response - `intentEngine.js` catches it, logs
+  it, and re-runs the query through the rule-based parser. A user never sees
+  an error because the LLM call failed; worst case, accuracy on hard phrasing
+  drops back to the rule-based baseline for that one request.
+
+`test/llmIntent.test.js` covers the tool schema and the flat-output-to-intent
+mapping without any network call. `test/llmIntent.live.test.js` makes real
+API calls and is skipped automatically unless `ANTHROPIC_API_KEY` is set:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... node --test test/llmIntent.live.test.js
 ```
 
 ## Persistence
