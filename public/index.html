@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ask the ERP</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --surface-2: #F1F5F9;
+    --border: #E2E8F0;
+    --border-soft: #EEF2F7;
+    --ink: #1E293B;
+    --ink-soft: #334155;
+    --muted: #64748B;
+    --muted-2: #94A3B8;
+    --accent: #4F46E5;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #EEF2FF;
+    --accent-soft-border: #C7D2FE;
+    --amber: #B45309;
+    --amber-bg: #FFFBEB;
+    --amber-border: #FDE68A;
+    --green: #15803D;
+    --green-bg: #F0FDF4;
+    --green-border: #BBF7D0;
+    --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 6px 20px -8px rgba(15,23,42,0.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0B1220;
+      --surface: #131B2E;
+      --surface-2: #1A2338;
+      --border: #263149;
+      --border-soft: #1D2740;
+      --ink: #E7ECF7;
+      --ink-soft: #C7D0E3;
+      --muted: #93A0BE;
+      --muted-2: #6B7995;
+      --accent: #818CF8;
+      --accent-ink: #0B1220;
+      --accent-soft: #1B1F3B;
+      --accent-soft-border: #34366B;
+      --amber: #FBBF24;
+      --amber-bg: #2A2210;
+      --amber-border: #4A3B14;
+      --green: #4ADE80;
+      --green-bg: #0F2A18;
+      --green-border: #17472A;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 28px -12px rgba(0,0,0,0.55);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  .banner {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--accent-soft); border: 1px solid var(--accent-soft-border);
+    color: var(--accent); border-radius: 10px; padding: 10px 14px; font-size: 12.5px;
+    margin-bottom: 24px;
+  }
+  .banner svg { flex: 0 0 auto; }
+  .banner b { font-weight: 700; }
+
+  h1 { font-size: 21px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--muted); font-size: 13.5px; margin: 0 0 20px; }
+
+  .search-row { display: flex; gap: 8px; }
+  .search-field { position: relative; flex: 1; }
+  .search-field svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted-2); }
+  .search-field input {
+    width: 100%; height: 44px; padding: 0 14px 0 36px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink); font-size: 14px;
+  }
+  .search-field input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .ask-btn {
+    height: 44px; padding: 0 18px; border-radius: 10px; border: none;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 14px;
+    display: flex; align-items: center; gap: 7px; cursor: pointer;
+  }
+  .ask-btn:hover { filter: brightness(1.06); }
+  .ask-btn:disabled { opacity: 0.6; cursor: default; }
+
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .example-chip {
+    font-size: 12px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted); cursor: pointer;
+  }
+  .example-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  .result-area { margin-top: 26px; }
+  .card { border-radius: 12px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
+
+  .loading { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13.5px; padding: 20px 4px; }
+  .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+  .state-box { padding: 16px 18px; display: flex; gap: 12px; }
+  .state-box.amber { background: var(--amber-bg); border-color: var(--amber-border); }
+  .state-box.green { background: var(--green-bg); border-color: var(--green-border); }
+  .state-box.indigo { background: var(--accent-soft); border-color: var(--accent-soft-border); }
+  .state-icon { flex: 0 0 auto; margin-top: 1px; }
+  .state-title { font-weight: 700; font-size: 13.5px; }
+  .state-title.amber { color: var(--amber); }
+  .state-title.green { color: var(--green); }
+  .state-title.indigo { color: var(--accent); }
+  .state-body { color: var(--ink-soft); font-size: 13.5px; margin-top: 3px; }
+  .kicker { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  thead th {
+    text-align: left; padding: 10px 16px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--muted); background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td { padding: 10px 16px; border-bottom: 1px solid var(--border-soft); color: var(--ink-soft); }
+  tbody tr:last-child td { border-bottom: none; }
+  .results-meta { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+
+  .candidate {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    width: 100%; text-align: left; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface); cursor: pointer; margin-bottom: 8px;
+  }
+  .candidate:hover { border-color: var(--accent); }
+  .candidate .name { display: block; font-weight: 600; font-size: 13.5px; }
+  .candidate .meta { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+  .btn {
+    font-size: 12.5px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+  }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn:hover { filter: brightness(1.05); }
+  .btn:disabled { opacity: 0.55; cursor: default; }
+
+  .empty-state { text-align: center; color: var(--muted-2); font-size: 13px; padding: 40px 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    <span><b>Live</b> — this talks to a real backend (see <code>/api/ask/*</code>) with fuzzy nearest-match entity resolution and a persisted in-memory store. It's a reference implementation of the spec, not hardened for untrusted public traffic - see README before exposing it beyond your own team.</span>
+  </div>
+
+  <h1>Ask the ERP</h1>
+  <p class="subtitle">Type what you need in plain English — search, record payments, manage concessions and cancellations, raise a support ticket, change a bus route, or check what's pending for your approval.</p>
+
+  <div class="search-row">
+    <div class="search-field">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="q" type="text" placeholder="e.g. students in class 6 with unpaid term fees" autocomplete="off" />
+    </div>
+    <button class="ask-btn" id="ask-btn">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/></svg>
+      Ask
+    </button>
+  </div>
+
+  <div class="examples" id="examples"></div>
+  <div class="result-area" id="result-area"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const EXAMPLES = [
+    "students in class 6 with unpaid term fees",
+    "fee report for Ravi Kumar",
+    "expenditure over 20000 paid by cash",
+    "record a payment of 5000 term fee for Priya Sharma in class 8",
+    "mark Ravi Kumar as inactive",
+    "reopen the term fee concession for Priya Sharma because parent submitted new income proof",
+    "cancel the receipt for Ravi Kumar",
+    "what's pending for my approval",
+    "show the class consolidated report for RC Puram",
+    "change the bus route for Ravi Kumar to North Route",
+    "raise a ticket, the print button doesn't respond on the Fee Receipts page",
+  ];
+  document.getElementById("examples").innerHTML = EXAMPLES.map(
+    (e) => `<button class="example-chip" data-ex="${e.replace(/"/g, "&quot;")}">${e}</button>`
+  ).join("");
+
+  const CONCESSION_BUCKET_LABEL = { adm: "Admission Fee", term: "Term Fee", transport: "Transport Fee", hostel: "Hostel Fee", application: "Application Fee", registration: "Registration Fee" };
+  const FEE_TYPE_LABEL = { term: "term", admission: "admission", transport: "transport", hostel: "hostel", registration: "registration", application: "application" };
+
+  const resultArea = document.getElementById("result-area");
+  const input = document.getElementById("q");
+  const askBtn = document.getElementById("ask-btn");
+
+  function icon(name) {
+    const icons = {
+      warn: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.7 17a1.8 1.8 0 001.5 2.7h15.6a1.8 1.8 0 001.5-2.7L13.7 3.9a1.8 1.8 0 00-3.4 0z"/></svg>',
+      check: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>',
+      receipt: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16l3-2 3 2 3-2 3 2V8z"/><path d="M14 2v6h6"/></svg>',
+      user: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+      arrow: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+      bus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M3 11h18"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/></svg>',
+      ticket: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 000 4v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-2a2 2 0 000-4V9z"/><path d="M13 5v3M13 16v3"/></svg>',
+    };
+    return icons[name] || "";
+  }
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || `Request failed (${res.status})`);
+      err.code = data.code;
+      throw err;
+    }
+    return data;
+  }
+
+  function renderError(title, body) {
+    resultArea.innerHTML = `
+      <div class="card state-box amber">
+        <div class="state-icon" style="color:var(--amber)">${icon("warn")}</div>
+        <div>
+          <div class="state-title amber">${title}</div>
+          <div class="state-body">${body}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderIndigo(title, body) {
+    resultArea.innerHTML = `
+      <div class="card state-box indigo">
+        <div class="state-icon" style="color:var(--accent)">${icon("check")}</div>
+        <div>
+          <div class="state-title indigo">${title}</div>
+          <div class="state-body">${body}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderSuccess(title, body) {
+    resultArea.innerHTML = `
+      <div class="card state-box green">
+        <div class="state-icon" style="color:var(--green)">${icon("check")}</div>
+        <div>
+          <div class="state-title green">${title}</div>
+          <div class="state-body">${body}</div>
+        </div>
+      </div>`;
+  }
+
+  async function ask(query) {
+    input.value = query;
+    resultArea.innerHTML = `<div class="loading"><div class="spinner"></div>Understanding your request…</div>`;
+    askBtn.disabled = true;
+    try {
+      const intent = await api("/api/ask/interpret", { query });
+      askBtn.disabled = false;
+
+      if (!intent.understood) {
+        renderError("Didn't quite catch that", "Try rephrasing — name a class, a fee type, a branch, or a person's name to narrow it down.");
+        return;
+      }
+
+      if (intent.action === "search") {
+        await runSearch(intent);
+        return;
+      }
+
+      await resolveAction(intent);
+    } catch (err) {
+      askBtn.disabled = false;
+      renderError("Something went wrong", err.message || "The request failed. Please try again.");
+    }
+  }
+
+  async function runSearch(intent) {
+    const data = await api("/api/ask/resolve", { action: "search", entity: intent.entity, filters: intent.filters });
+    resultArea.innerHTML = `
+      <div class="results-meta">${data.rows.length} result${data.rows.length === 1 ? "" : "s"} &middot; ${data.entity.replace(/_/g, " ")}</div>
+      <div class="card" style="overflow:hidden;">
+        <div style="overflow-x:auto;">
+          <table>
+            <thead><tr>${data.cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead>
+            <tbody>
+              ${data.rows.length === 0 ? `<tr><td colspan="${data.cols.length}"><div class="empty-state">No matches.</div></td></tr>` :
+                data.rows.map((r) => `<tr>${r.map((v) => `<td>${v}</td>`).join("")}</tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  async function resolveAction(intent, targetOverride) {
+    if (intent.action === "create_support_ticket") {
+      showConfirmTicket(intent);
+      return;
+    }
+
+    const target = targetOverride || intent.target;
+    const data = await api("/api/ask/resolve", { action: intent.action, target, params: intent.params });
+
+    if (data.status === "no_match") {
+      renderError("No match", data.message || "Couldn't find a student matching that.");
+      return;
+    }
+    if (data.status === "noop") {
+      renderIndigo("Nothing to request", data.message);
+      return;
+    }
+    if (data.status === "rejected") {
+      renderError("Not on transport", data.message);
+      return;
+    }
+    if (data.status === "disambiguate" && data.level === "student") {
+      renderStudentPicker(intent, data.candidates);
+      return;
+    }
+    if (data.status === "disambiguate" && data.level === "receipt") {
+      renderReceiptPicker(intent, data.student, data.candidates);
+      return;
+    }
+    // resolved
+    if (intent.action === "request_receipt_cancellation") {
+      showConfirmCancellation(intent, data.candidate, data.receipt);
+    } else {
+      showConfirmGeneric(intent, data.candidate);
+    }
+  }
+
+  function renderStudentPicker(intent, candidates) {
+    resultArea.innerHTML = `
+      <div class="results-meta">Found ${candidates.length} students matching that — which one did you mean?</div>
+      ${candidates.map((c) => `
+        <button class="candidate" data-pick="${c.id}">
+          <span><span class="name">${c.name}</span><span class="meta">${c.admission_no} &middot; Class ${c.class} &middot; ${c.branch} &middot; ${c.status}</span></span>
+          ${icon("arrow")}
+        </button>`).join("")}`;
+    Array.from(document.querySelectorAll("[data-pick]")).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const picked = candidates.find((c) => c.id === btn.dataset.pick);
+        // Re-resolve pinned to this exact student (name + class) so a same-
+        // named sibling can't be picked up by a later step.
+        resolveAction(intent, { student_name: picked.name, class: picked.class });
+      });
+    });
+  }
+
+  function renderReceiptPicker(intent, student, receipts) {
+    resultArea.innerHTML = `
+      <div class="results-meta">${student.name} has ${receipts.length} active receipts — which one?</div>
+      ${receipts.map((r, i) => `
+        <button class="candidate" data-receipt="${i}">
+          <span><span class="name">${r.receipt_no}</span><span class="meta">${r.fee_types} &middot; ₹${Number(r.amount).toLocaleString("en-IN")} &middot; ${r.date}</span></span>
+          ${icon("arrow")}
+        </button>`).join("")}`;
+    Array.from(document.querySelectorAll("[data-receipt]")).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        showConfirmCancellation(intent, student, receipts[Number(btn.dataset.receipt)]);
+      });
+    });
+  }
+
+  function reasonSection(existingReason) {
+    const val = existingReason || "";
+    return `
+      <div style="margin-top:10px;">
+        <label style="font-size:11.5px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">
+          Reason ${val ? "" : '<span style="color:var(--amber)">(required)</span>'}
+        </label>
+        <textarea id="reason-input" rows="2" placeholder="Why is this being requested?" style="width:100%;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--ink);font-size:13px;padding:8px 10px;font-family:inherit;resize:vertical;">${val.replace(/</g, "&lt;")}</textarea>
+      </div>`;
+  }
+
+  function wireReasonAndConfirm(onConfirm) {
+    const reasonInput = document.getElementById("reason-input");
+    const confirmBtn = document.getElementById("confirm-btn");
+    if (reasonInput) {
+      reasonInput.addEventListener("input", () => { confirmBtn.disabled = !reasonInput.value.trim(); });
+    }
+    confirmBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      try {
+        await onConfirm(reasonInput ? reasonInput.value.trim() : undefined);
+      } catch (err) {
+        renderError("Couldn't complete that", err.message || "The request failed.");
+      }
+    });
+    document.getElementById("cancel-btn").addEventListener("click", () => { resultArea.innerHTML = ""; });
+  }
+
+  function showConfirmTicket(intent) {
+    resultArea.innerHTML = `
+      <div class="card state-box indigo">
+        <div class="state-icon" style="color:var(--accent)">${icon("ticket")}</div>
+        <div style="flex:1;">
+          <div class="kicker" style="color:var(--accent)">Confirm before this is sent</div>
+          <div class="state-body" style="color:var(--ink);margin-top:6px;">
+            Raise a <strong>${intent.params.type}</strong> ticket about the <strong>${intent.params.page}</strong> page?
+          </div>
+          <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);font-size:13px;color:var(--ink-soft);">"${intent.params.description}"</div>
+          <div class="btn-row">
+            <button class="btn primary" id="confirm-btn">Confirm</button>
+            <button class="btn" id="cancel-btn">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById("confirm-btn").addEventListener("click", async () => {
+      try {
+        const result = await api("/api/ask/confirm", { action: "create_support_ticket", params: intent.params });
+        renderSuccess("Ticket raised", result.message);
+      } catch (err) {
+        renderError("Couldn't raise the ticket", err.message);
+      }
+    });
+    document.getElementById("cancel-btn").addEventListener("click", () => { resultArea.innerHTML = ""; });
+  }
+
+  function showConfirmCancellation(intent, student, receipt) {
+    const reason = intent.params.reason;
+    resultArea.innerHTML = `
+      <div class="card state-box indigo">
+        <div class="state-icon" style="color:var(--accent)">${icon("receipt")}</div>
+        <div style="flex:1;">
+          <div class="kicker" style="color:var(--accent)">Confirm before this is requested</div>
+          <div class="state-body" style="color:var(--ink);margin-top:6px;">
+            Request cancellation of receipt <strong>${receipt.receipt_no}</strong> (${receipt.fee_types}, ₹${Number(receipt.amount).toLocaleString("en-IN")}, ${receipt.date}) for
+            <strong>${student.name}</strong>? This notifies the Admin Officer for approval.
+          </div>
+          ${reasonSection(reason)}
+          <div class="btn-row">
+            <button class="btn primary" id="confirm-btn" ${reason ? "" : "disabled"}>Confirm</button>
+            <button class="btn" id="cancel-btn">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    wireReasonAndConfirm(async (reasonValue) => {
+      const result = await api("/api/ask/confirm", {
+        action: "request_receipt_cancellation",
+        student_id: student.id, resolved_name: student.name, resolved_class: student.class,
+        receipt_no: receipt.receipt_no, params: { reason: reasonValue || reason },
+      });
+      renderSuccess("Cancellation requested", result.message);
+    });
+  }
+
+  function showConfirmGeneric(intent, student) {
+    if (intent.action === "request_concession_change") {
+      const reason = intent.params.reason;
+      resultArea.innerHTML = `
+        <div class="card state-box indigo">
+          <div class="state-icon" style="color:var(--accent)">${icon("receipt")}</div>
+          <div style="flex:1;">
+            <div class="kicker" style="color:var(--accent)">Confirm before this is requested</div>
+            <div class="state-body" style="color:var(--ink);margin-top:6px;">
+              Request to re-open the <strong>${CONCESSION_BUCKET_LABEL[intent.params.bucket] || intent.params.bucket}</strong> concession for
+              <strong>${student.name}</strong> (Class ${student.class}, ${student.branch})? This notifies the Admin Officer, who can unlock it for editing.
+            </div>
+            ${reasonSection(reason)}
+            <div class="btn-row">
+              <button class="btn primary" id="confirm-btn" ${reason ? "" : "disabled"}>Confirm</button>
+              <button class="btn" id="cancel-btn">Cancel</button>
+            </div>
+          </div>
+        </div>`;
+      wireReasonAndConfirm(async (reasonValue) => {
+        const result = await api("/api/ask/confirm", {
+          action: "request_concession_change",
+          student_id: student.id, resolved_name: student.name, resolved_class: student.class,
+          params: { bucket: intent.params.bucket, reason: reasonValue || reason },
+        });
+        renderSuccess("Concession request sent", result.message);
+      });
+      return;
+    }
+
+    if (intent.action === "record_payment") {
+      resultArea.innerHTML = `
+        <div class="card state-box indigo">
+          <div class="state-icon" style="color:var(--accent)">${icon("receipt")}</div>
+          <div style="flex:1;">
+            <div class="kicker" style="color:var(--accent)">Confirm before this happens</div>
+            <div class="state-body" style="color:var(--ink);margin-top:6px;">
+              Record a <strong>₹${Number(intent.params.amount).toLocaleString("en-IN")}</strong> ${FEE_TYPE_LABEL[intent.params.fee_type] || intent.params.fee_type} fee payment for
+              <strong>${student.name}</strong> (Class ${student.class}, ${student.branch})?
+            </div>
+            <div class="btn-row">
+              <button class="btn primary" id="confirm-btn">Confirm</button>
+              <button class="btn" id="cancel-btn">Cancel</button>
+            </div>
+          </div>
+        </div>`;
+      document.getElementById("confirm-btn").addEventListener("click", async () => {
+        try {
+          const result = await api("/api/ask/confirm", {
+            action: "record_payment",
+            student_id: student.id, resolved_name: student.name, resolved_class: student.class,
+            params: intent.params,
+          });
+          renderSuccess("Payment recorded", result.message);
+        } catch (err) {
+          renderError("Couldn't record the payment", err.message);
+        }
+      });
+      document.getElementById("cancel-btn").addEventListener("click", () => { resultArea.innerHTML = ""; });
+      return;
+    }
+
+    if (intent.action === "change_transport_route") {
+      resultArea.innerHTML = `
+        <div class="card state-box indigo">
+          <div class="state-icon" style="color:var(--accent)">${icon("bus")}</div>
+          <div style="flex:1;">
+            <div class="kicker" style="color:var(--accent)">Confirm before this happens</div>
+            <div class="state-body" style="color:var(--ink);margin-top:6px;">
+              Move <strong>${student.name}</strong> (Class ${student.class}, ${student.branch}) from <strong>${student.transport_route}</strong> to <strong>${intent.params.route}</strong>?
+            </div>
+            <div class="btn-row">
+              <button class="btn primary" id="confirm-btn">Confirm</button>
+              <button class="btn" id="cancel-btn">Cancel</button>
+            </div>
+          </div>
+        </div>`;
+      document.getElementById("confirm-btn").addEventListener("click", async () => {
+        try {
+          const result = await api("/api/ask/confirm", {
+            action: "change_transport_route",
+            student_id: student.id, resolved_name: student.name, resolved_class: student.class,
+            params: intent.params,
+          });
+          renderSuccess("Bus route updated", result.message);
+        } catch (err) {
+          renderError("Couldn't update the route", err.message);
+        }
+      });
+      document.getElementById("cancel-btn").addEventListener("click", () => { resultArea.innerHTML = ""; });
+      return;
+    }
+
+    // update_status
+    resultArea.innerHTML = `
+      <div class="card state-box indigo">
+        <div class="state-icon" style="color:var(--accent)">${icon("user")}</div>
+        <div style="flex:1;">
+          <div class="kicker" style="color:var(--accent)">Confirm before this happens</div>
+          <div class="state-body" style="color:var(--ink);margin-top:6px;">
+            Request a status change for <strong>${student.name}</strong> from <strong>${student.status}</strong> to <strong>${intent.params.status}</strong>?
+            This notifies the Principal for approval.
+          </div>
+          <div class="btn-row">
+            <button class="btn primary" id="confirm-btn">Confirm</button>
+            <button class="btn" id="cancel-btn">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById("confirm-btn").addEventListener("click", async () => {
+      try {
+        const result = await api("/api/ask/confirm", {
+          action: "update_status",
+          student_id: student.id, resolved_name: student.name, resolved_class: student.class,
+          params: intent.params,
+        });
+        renderSuccess("Status change requested", result.message);
+      } catch (err) {
+        renderError("Couldn't request the status change", err.message);
+      }
+    });
+    document.getElementById("cancel-btn").addEventListener("click", () => { resultArea.innerHTML = ""; });
+  }
+
+  askBtn.addEventListener("click", () => ask(input.value));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(input.value); });
+  Array.from(document.querySelectorAll("[data-ex]")).forEach((btn) => {
+    btn.addEventListener("click", () => ask(btn.dataset.ex));
+  });
+})();
+</script>
+</body>
+</html>

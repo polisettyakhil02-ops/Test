@@ -1,0 +1,9 @@
+node_modules/
+npm-debug.log*
+
+# Runtime state - regenerated from src/data/seed.js on first boot, never committed.
+data/store.json
+data/audit.log
+
+.env
+.DS_Store
