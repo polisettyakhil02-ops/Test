@@ -85,6 +85,41 @@ export function formatAddress(address: ClientDTO['billingAddress']): string {
     .join(', ')
 }
 
+export const INVOICE_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  sent: 'Sent',
+  paid: 'Paid',
+  partially_paid: 'Partly paid',
+  overdue: 'Overdue',
+  cancelled: 'Cancelled',
+}
+
+export const INVOICE_STATUS_VARIANTS: Record<
+  string,
+  'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
+> = {
+  draft: 'secondary',
+  sent: 'outline',
+  paid: 'success',
+  partially_paid: 'warning',
+  overdue: 'destructive',
+  cancelled: 'secondary',
+}
+
+const dateFormatter = new Intl.DateTimeFormat('en-IN', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+/** Formats an ISO string for display; returns an em dash when absent. */
+export function formatDate(iso: string): string {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.format(date)
+}
+
 const currencyFormatter = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',

@@ -48,11 +48,30 @@ src/
   models/            User, Client, Item, Invoice, Counter
   lib/validation.ts  Zod schemas shared by every form and server action
   lib/dto.ts         Mongoose document -> JSON-safe DTO mapping
+  lib/metrics.ts     Dashboard aggregation queries
   app/login/         Login page + sign-in server action
   app/dashboard/     Protected shell: sidebar, nav, log out
+    page.tsx         Metrics, counts, recent invoices
     clients/         List, search, create, edit, delete
     items/           List, search, create, edit, delete
 ```
+
+### Dashboard metrics
+
+"Total revenue" is money actually received (`amountPaid`), not merely billed —
+the amount billed is shown underneath as context. Cancelled invoices are
+excluded from every figure: they are neither revenue nor owed.
+
+"Overdue" is computed from the due date and the balance rather than trusting
+the stored status, so an invoice that has quietly gone past due still counts
+without a nightly job having to flip its status first.
+
+Two details that would otherwise bite on a fresh install: a `$group`
+aggregation over zero matching documents returns an **empty array**, so reading
+`rows[0]` directly crashes on first login — `summarizeTotals()` handles that and
+is covered by tests. And a recent-invoice row prefers the client-name snapshot
+taken at issue time over the live record, so renaming a client never rewrites
+invoices already sent.
 
 ### Why DTOs
 

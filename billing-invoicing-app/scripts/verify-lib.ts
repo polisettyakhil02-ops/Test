@@ -9,7 +9,14 @@ import assert from 'node:assert/strict'
 import { Types } from 'mongoose'
 import { clientSchema, itemSchema, fieldErrors } from '../src/lib/validation'
 import { containsRegex, readQuery } from '../src/lib/search'
-import { toClientDTO, toItemDTO, formatAddress, formatCurrency } from '../src/lib/dto'
+import {
+  toClientDTO,
+  toItemDTO,
+  formatAddress,
+  formatCurrency,
+  formatDate,
+} from '../src/lib/dto'
+import { summarizeTotals, toRecentInvoice } from '../src/lib/metrics'
 
 let passed = 0
 
@@ -178,6 +185,82 @@ async function main() {
     const formatted = formatCurrency(1500.5)
     assert.match(formatted, /1,500\.50/)
     assert.match(formatCurrency(0), /0\.00/)
+  })
+
+  await check('formatDate handles a valid ISO string, empty and garbage', () => {
+    assert.equal(formatDate('2026-01-15T10:30:00.000Z'), '15 Jan 2026')
+    assert.equal(formatDate(''), '—')
+    assert.equal(formatDate('not-a-date'), '—')
+  })
+
+  console.log('\nDashboard metrics')
+
+  await check('summarizeTotals returns zeros for an empty aggregation', () => {
+    // A fresh database matches no documents, so $group yields []. Reading
+    // rows[0] directly here would crash the dashboard on first login.
+    assert.deepEqual(summarizeTotals([]), {
+      totalBilled: 0,
+      totalPaid: 0,
+      totalDue: 0,
+      invoiceCount: 0,
+    })
+    assert.deepEqual(summarizeTotals(undefined), {
+      totalBilled: 0,
+      totalPaid: 0,
+      totalDue: 0,
+      invoiceCount: 0,
+    })
+  })
+
+  await check('summarizeTotals fills missing fields and rounds money', () => {
+    const result = summarizeTotals([{ totalBilled: 1000.005, invoiceCount: 3 }])
+    assert.equal(result.totalBilled, 1000.01)
+    assert.equal(result.totalPaid, 0)
+    assert.equal(result.totalDue, 0)
+    assert.equal(result.invoiceCount, 3)
+  })
+
+  await check('toRecentInvoice prefers the snapshot name over the live client', () => {
+    const recent = toRecentInvoice({
+      _id: new Types.ObjectId(),
+      invoiceNumber: 'INV-00001',
+      clientSnapshot: { name: 'Acme Pvt Ltd' },
+      client: { name: 'Acme Renamed Ltd' },
+      issueDate: new Date('2026-03-01T00:00:00.000Z'),
+      status: 'sent',
+      total: 1180,
+      amountDue: 1180,
+    } as unknown as Parameters<typeof toRecentInvoice>[0])
+
+    // Renaming a client must not rewrite invoices already sent.
+    assert.equal(recent.clientName, 'Acme Pvt Ltd')
+    assert.equal(recent.issueDate, '2026-03-01T00:00:00.000Z')
+    assert.equal(typeof recent.id, 'string')
+  })
+
+  await check('toRecentInvoice falls back when the snapshot is blank', () => {
+    const withLive = toRecentInvoice({
+      _id: new Types.ObjectId(),
+      invoiceNumber: 'INV-00002',
+      clientSnapshot: { name: '   ' },
+      client: { name: 'Globex Ltd' },
+      status: 'draft',
+      total: 0,
+      amountDue: 0,
+    } as unknown as Parameters<typeof toRecentInvoice>[0])
+    assert.equal(withLive.clientName, 'Globex Ltd')
+
+    // A deleted client populates as null -- must not crash the dashboard.
+    const orphaned = toRecentInvoice({
+      _id: new Types.ObjectId(),
+      invoiceNumber: 'INV-00003',
+      client: null,
+      status: 'draft',
+      total: 0,
+      amountDue: 0,
+    } as unknown as Parameters<typeof toRecentInvoice>[0])
+    assert.equal(orphaned.clientName, 'Unknown client')
+    assert.equal(orphaned.issueDate, '')
   })
 
   console.log(`\n${passed} checks passed\n`)
