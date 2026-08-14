@@ -3,6 +3,7 @@ import { Receipt } from 'lucide-react'
 import { auth } from '@/auth'
 import { LogoutButton } from '@/components/logout-button'
 import { SidebarNav } from '@/components/sidebar-nav'
+import { Toaster } from '@/components/ui/sonner'
 
 export default async function DashboardLayout({
   children,
@@ -59,6 +60,8 @@ export default async function DashboardLayout({
 
         <main className="bg-muted/40 flex-1 p-6">{children}</main>
       </div>
+
+      <Toaster />
     </div>
   )
 }

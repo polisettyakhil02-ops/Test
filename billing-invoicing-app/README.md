@@ -32,7 +32,9 @@ account; re-running it with an existing email resets that user's password.
 | `npm run dev` | Dev server |
 | `npm run build` | Production build |
 | `npm run create-admin` | Creates or updates an admin user |
-| `npm run verify-models` | Offline checks on the schemas and invoice arithmetic (no DB needed) |
+| `npm run verify` | All offline checks (no DB needed) |
+| `npm run verify-models` | Schema validation and invoice arithmetic |
+| `npm run verify-lib` | Form validation, search escaping, DTO mapping |
 | `npm run lint` | ESLint |
 
 ## Layout
@@ -44,9 +46,36 @@ src/
   proxy.ts           Route protection (Next.js 16's renamed middleware)
   lib/mongodb.ts     Cached Mongoose connection
   models/            User, Client, Item, Invoice, Counter
+  lib/validation.ts  Zod schemas shared by every form and server action
+  lib/dto.ts         Mongoose document -> JSON-safe DTO mapping
   app/login/         Login page + sign-in server action
   app/dashboard/     Protected shell: sidebar, nav, log out
+    clients/         List, search, create, edit, delete
+    items/           List, search, create, edit, delete
 ```
+
+### Why DTOs
+
+Mongoose `.lean()` results still hold `ObjectId` and `Date` instances, which
+cannot cross the server/client boundary — React rejects them with *"Only plain
+objects … can be passed to Client Components"*. `lib/dto.ts` maps documents to
+plain shapes before anything reaches a Client Component.
+
+### Deleting
+
+Deleting a **client** is refused while any invoice references it, so an invoice
+can never be orphaned. Deleting an **item** is allowed: invoice lines snapshot
+the item's description, price and tax rate, so past invoices are unaffected.
+Because MongoDB has no cascading delete, the now-dangling `item` reference on
+those lines is cleared explicitly rather than left pointing at a deleted
+document.
+
+### Search
+
+`?q=` is turned into a case-insensitive substring regex by
+`lib/search.ts`. Regex metacharacters are escaped first — otherwise a query of
+`(` is invalid regex syntax and would 500 the page, and a pattern like `(a+)+`
+is a denial-of-service vector.
 
 ### A note on `proxy.ts`
 

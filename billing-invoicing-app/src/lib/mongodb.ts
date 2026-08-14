@@ -38,6 +38,9 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
       // Fail fast instead of silently queueing operations when the DB is down.
       bufferCommands: false,
       dbName: process.env.MONGODB_DB || 'billing',
+      // Default is 30s, which makes an unreachable database look like a hung
+      // page. Surface the error while someone is still watching the tab.
+      serverSelectionTimeoutMS: 10_000,
     })
   }
 
