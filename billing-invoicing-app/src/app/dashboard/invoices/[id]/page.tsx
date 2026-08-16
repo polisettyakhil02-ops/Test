@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { isValidObjectId } from 'mongoose'
-import { ArrowLeft, Pencil } from 'lucide-react'
+import { ArrowLeft, Download, FileText, Pencil } from 'lucide-react'
 import { connectToDatabase } from '@/lib/mongodb'
 import { Invoice } from '@/models/Invoice'
 import { taxBreakdown } from '@/lib/invoice-math'
@@ -71,13 +71,30 @@ export default async function InvoiceDetailPage(
               {INVOICE_STATUS_LABELS[invoice.status] ?? invoice.status}
             </Badge>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <InvoiceStatusSelect invoiceId={invoice.id} status={invoice.status} />
             <Button asChild variant="outline">
               <Link href={`/dashboard/invoices/${invoice.id}/edit`}>
                 <Pencil />
                 Edit
               </Link>
+            </Button>
+            {/* Opens in the browser's PDF viewer, which is also how you print. */}
+            <Button asChild variant="outline">
+              <a
+                href={`/dashboard/invoices/${invoice.id}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <FileText />
+                View PDF
+              </a>
+            </Button>
+            <Button asChild>
+              <a href={`/dashboard/invoices/${invoice.id}/pdf?download=1`}>
+                <Download />
+                Download
+              </a>
             </Button>
           </div>
         </div>

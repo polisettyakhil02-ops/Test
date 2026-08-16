@@ -14,6 +14,7 @@ import {
   toItemDTO,
   formatAddress,
   formatCurrency,
+  formatCurrencyPlain,
   formatDate,
 } from '../src/lib/dto'
 import { summarizeTotals, toRecentInvoice } from '../src/lib/metrics'
@@ -185,6 +186,16 @@ async function main() {
     const formatted = formatCurrency(1500.5)
     assert.match(formatted, /1,500\.50/)
     assert.match(formatCurrency(0), /0\.00/)
+  })
+
+  await check('formatCurrencyPlain never emits the rupee sign', () => {
+    // PDF base-14 fonts use WinAnsi encoding, which has no U+20B9 -- a rupee
+    // sign silently renders as a superscript one. Verified against a real PDF.
+    const formatted = formatCurrencyPlain(1500.5)
+    assert.equal(formatted, 'INR 1,500.50')
+    assert.ok(!formatted.includes('\u20B9'), 'PDF currency must stay ASCII')
+    assert.equal(formatCurrencyPlain(0), 'INR 0.00')
+    assert.equal(formatCurrencyPlain(1234567.891), 'INR 12,34,567.89')
   })
 
   await check('formatDate handles a valid ISO string, empty and garbage', () => {

@@ -1,7 +1,9 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  /* config options here */
-};
+  // @react-pdf/renderer resolves fonts and uses Node internals at runtime; it
+  // has to stay an external CommonJS require rather than be bundled.
+  serverExternalPackages: ['@react-pdf/renderer'],
+}
 
-export default nextConfig;
+export default nextConfig

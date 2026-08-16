@@ -242,3 +242,20 @@ const currencyFormatter = new Intl.NumberFormat('en-IN', {
 export function formatCurrency(amount: number): string {
   return currencyFormatter.format(amount)
 }
+
+const plainNumberFormatter = new Intl.NumberFormat('en-IN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+/**
+ * Currency for the PDF, written as "INR 1,234.00".
+ *
+ * The rupee sign (U+20B9) is deliberately avoided here: PDF base-14 fonts use
+ * WinAnsi encoding, which has no such glyph, so "₹" silently renders as "¹".
+ * Verified by extracting text from a generated PDF. The web UI keeps the real
+ * symbol -- browsers have fonts that cover it.
+ */
+export function formatCurrencyPlain(amount: number): string {
+  return `INR ${plainNumberFormatter.format(amount)}`
+}

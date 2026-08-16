@@ -50,13 +50,44 @@ src/
   lib/dto.ts         Mongoose document -> JSON-safe DTO mapping
   lib/metrics.ts     Dashboard aggregation queries
   lib/invoice-math.ts  Invoice arithmetic, shared by server and browser
+  lib/company.ts       Your business details, read from env
+  lib/pdf/             A4 invoice PDF document
   app/login/         Login page + sign-in server action
   app/dashboard/     Protected shell: sidebar, nav, log out
     page.tsx         Metrics, counts, recent invoices
     clients/         List, search, create, edit, delete
     items/           List, search, create, edit, delete
     invoices/        List, filter, create, edit, view, delete
+      [id]/pdf/      Route handler that renders the A4 PDF
 ```
+
+### PDF export
+
+Each invoice has **View PDF** (opens in the browser's viewer, which is also how
+you print) and **Download**. Both hit `/dashboard/invoices/<id>/pdf`; the
+download button just adds `?download=1`, which flips `Content-Disposition` from
+`inline` to `attachment`.
+
+Rendering happens server-side with `@react-pdf/renderer`, so the PDF is real
+vector output with selectable text — not a screenshot of the page. It paginates
+automatically, repeating the table header and the footer on every page.
+
+Your own business details (the "from" side) come from `COMPANY_*` environment
+variables — single-tenant, so they are configuration rather than data. See
+`.env.example`.
+
+**The PDF says `INR 1,234.00`, not `₹1,234.00`, on purpose.** The PDF base-14
+fonts use WinAnsi encoding, which has no rupee sign (U+20B9); it silently
+renders as a superscript one. This was confirmed by extracting text from a
+generated PDF. The web UI keeps the real symbol, since browsers have fonts that
+cover it. To use `₹` in the PDF you would need to register and embed a font
+that includes the glyph.
+
+One layout gotcha worth knowing if you edit `lib/pdf/invoice-pdf.tsx`: do not
+set `lineHeight` on the `Page` style. It is inherited by the absolutely
+positioned footer and inflates its computed height enough that the footer
+silently never renders at all. Set line spacing on the individual paragraph
+blocks instead.
 
 ### Dashboard metrics
 
