@@ -1,18 +1,28 @@
 import { Schema, model, models, Types, type Model, type HydratedDocument } from 'mongoose'
 import { nextSequence } from '@/models/Counter'
+import {
+  INVOICE_STATUSES,
+  recalculateInvoice,
+  type DiscountType,
+  type InvoiceStatus,
+} from '@/lib/invoice-math'
 
-export const INVOICE_STATUSES = [
-  'draft',
-  'sent',
-  'paid',
-  'partially_paid',
-  'overdue',
-  'cancelled',
-] as const
-
-export type InvoiceStatus = (typeof INVOICE_STATUSES)[number]
-
-export type DiscountType = 'percentage' | 'fixed'
+// The arithmetic lives in lib/invoice-math.ts so the browser can run the exact
+// same code for the live totals preview without importing Mongoose.
+export {
+  INVOICE_STATUSES,
+  recalculateInvoice,
+  round2,
+  derivePaymentStatus,
+  taxBreakdown,
+} from '@/lib/invoice-math'
+export type {
+  InvoiceStatus,
+  DiscountType,
+  InvoiceTotals,
+  CalcInput,
+  CalcLine,
+} from '@/lib/invoice-math'
 
 export interface IInvoiceLineItem {
   item: Types.ObjectId | null
@@ -57,11 +67,6 @@ export interface IInvoice {
   terms: string
   createdAt: Date
   updatedAt: Date
-}
-
-/** Money helper: JS floats can't hold 0.1 + 0.2, so round at every boundary. */
-export function round2(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
 const LineItemSchema = new Schema<IInvoiceLineItem>(
@@ -159,79 +164,6 @@ const InvoiceSchema = new Schema<IInvoice>(
 
 InvoiceSchema.index({ client: 1, issueDate: -1 })
 InvoiceSchema.index({ status: 1 })
-
-/**
- * Recomputes every derived money field from quantity, unitPrice, taxRate and
- * the invoice-level discount. Exported so the UI can show a live preview using
- * exactly the same arithmetic the database will apply on save.
- *
- * An invoice-level discount is apportioned across lines in proportion to each
- * line's subtotal, and tax is charged on the post-discount amount -- taxing the
- * pre-discount value would overstate GST on every discounted invoice.
- */
-/** The fields recalculateInvoice reads. */
-export type InvoiceCalcInput = Pick<
-  IInvoice,
-  'lineItems' | 'discountType' | 'discountValue' | 'amountPaid'
->
-
-/** The fields recalculateInvoice writes. */
-export type InvoiceTotals = Pick<
-  IInvoice,
-  'subtotal' | 'discountAmount' | 'taxAmount' | 'total' | 'amountDue'
->
-
-export function recalculateInvoice<T extends InvoiceCalcInput>(
-  invoice: T,
-): T & InvoiceTotals {
-  const lines = invoice.lineItems ?? []
-
-  for (const line of lines) {
-    line.lineSubtotal = round2((line.quantity || 0) * (line.unitPrice || 0))
-  }
-
-  const subtotal = round2(lines.reduce((sum, line) => sum + line.lineSubtotal, 0))
-
-  const rawDiscount =
-    invoice.discountType === 'percentage'
-      ? round2((subtotal * (invoice.discountValue || 0)) / 100)
-      : round2(invoice.discountValue || 0)
-
-  // Never discount below zero.
-  const discountAmount = Math.min(Math.max(rawDiscount, 0), subtotal)
-
-  let allocatedDiscount = 0
-
-  lines.forEach((line, index) => {
-    const isLast = index === lines.length - 1
-
-    // Apportion by share of subtotal, but give the final line whatever cents
-    // are left so the per-line discounts always sum to discountAmount exactly.
-    const lineDiscount = isLast
-      ? round2(discountAmount - allocatedDiscount)
-      : round2(subtotal > 0 ? (discountAmount * line.lineSubtotal) / subtotal : 0)
-
-    allocatedDiscount = round2(allocatedDiscount + lineDiscount)
-
-    const taxable = round2(line.lineSubtotal - lineDiscount)
-
-    line.lineDiscount = lineDiscount
-    line.lineTaxAmount = round2((taxable * (line.taxRate || 0)) / 100)
-    line.lineTotal = round2(taxable + line.lineTaxAmount)
-  })
-
-  const taxAmount = round2(lines.reduce((sum, line) => sum + line.lineTaxAmount, 0))
-  const total = round2(subtotal - discountAmount + taxAmount)
-
-  const target = invoice as T & InvoiceTotals
-  target.subtotal = subtotal
-  target.discountAmount = discountAmount
-  target.taxAmount = taxAmount
-  target.total = total
-  target.amountDue = round2(total - (invoice.amountPaid || 0))
-
-  return target
-}
 
 InvoiceSchema.pre('validate', async function (this: HydratedDocument<IInvoice>) {
   if (!this.invoiceNumber) {

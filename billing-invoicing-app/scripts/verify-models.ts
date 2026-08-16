@@ -13,6 +13,8 @@ import {
   Invoice,
   recalculateInvoice,
   round2,
+  derivePaymentStatus,
+  taxBreakdown,
   type DiscountType,
   type IInvoiceLineItem,
 } from '../src/models/Invoice'
@@ -210,6 +212,61 @@ async function main() {
     assert.equal(doc.lineItems[0].lineTotal, 1180)
     assert.equal(doc.total, 1180)
     assert.equal(doc.lineItems[0].description, 'Design retainer')
+  })
+
+  console.log('\nPayment status derivation')
+
+  await check('draft and cancelled are never overridden', () => {
+    assert.equal(derivePaymentStatus('draft', 1000, 1000, null), 'draft')
+    assert.equal(derivePaymentStatus('cancelled', 1000, 0, null), 'cancelled')
+  })
+
+  await check('full payment becomes paid', () => {
+    assert.equal(derivePaymentStatus('sent', 1000, 1000, null), 'paid')
+    // Overpayment still counts as paid, not partially paid.
+    assert.equal(derivePaymentStatus('sent', 1000, 1200, null), 'paid')
+  })
+
+  await check('partial payment becomes partially_paid', () => {
+    assert.equal(derivePaymentStatus('sent', 1000, 400, null), 'partially_paid')
+  })
+
+  await check('unpaid past the due date becomes overdue', () => {
+    const now = new Date('2026-08-16T00:00:00.000Z')
+    const past = new Date('2026-08-01T00:00:00.000Z')
+    const future = new Date('2026-09-01T00:00:00.000Z')
+
+    assert.equal(derivePaymentStatus('sent', 1000, 0, past, now), 'overdue')
+    assert.equal(derivePaymentStatus('sent', 1000, 0, future, now), 'sent')
+    assert.equal(derivePaymentStatus('sent', 1000, 0, null, now), 'sent')
+  })
+
+  await check('a zero-total invoice is not silently marked paid', () => {
+    // 0 >= 0 would be true, so an empty invoice would otherwise read as paid.
+    assert.equal(derivePaymentStatus('sent', 0, 0, null), 'sent')
+  })
+
+  console.log('\nTax breakdown')
+
+  await check('groups tax by rate and sorts ascending', () => {
+    const rows = taxBreakdown([
+      { taxRate: 18, lineSubtotal: 1000, lineDiscount: 0, lineTaxAmount: 180 },
+      { taxRate: 5, lineSubtotal: 200, lineDiscount: 0, lineTaxAmount: 10 },
+      { taxRate: 18, lineSubtotal: 500, lineDiscount: 0, lineTaxAmount: 90 },
+    ])
+
+    assert.equal(rows.length, 2)
+    assert.deepEqual(rows[0], { rate: 5, taxable: 200, tax: 10 })
+    assert.deepEqual(rows[1], { rate: 18, taxable: 1500, tax: 270 })
+  })
+
+  await check('taxable amount is net of the apportioned discount', () => {
+    const rows = taxBreakdown([
+      { taxRate: 18, lineSubtotal: 1000, lineDiscount: 100, lineTaxAmount: 162 },
+    ])
+
+    assert.equal(rows[0].taxable, 900)
+    assert.equal(rows[0].tax, 162)
   })
 
   console.log(`\n${passed} checks passed\n`)

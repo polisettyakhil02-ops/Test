@@ -49,11 +49,13 @@ src/
   lib/validation.ts  Zod schemas shared by every form and server action
   lib/dto.ts         Mongoose document -> JSON-safe DTO mapping
   lib/metrics.ts     Dashboard aggregation queries
+  lib/invoice-math.ts  Invoice arithmetic, shared by server and browser
   app/login/         Login page + sign-in server action
   app/dashboard/     Protected shell: sidebar, nav, log out
     page.tsx         Metrics, counts, recent invoices
     clients/         List, search, create, edit, delete
     items/           List, search, create, edit, delete
+    invoices/        List, filter, create, edit, view, delete
 ```
 
 ### Dashboard metrics
@@ -118,8 +120,15 @@ even if the proxy were bypassed.
 
 Every derived amount on an invoice (line subtotals, apportioned discount, tax,
 total, amount due) is computed by `recalculateInvoice()` in
-`src/models/Invoice.ts` and re-derived in a `pre('validate')` hook, so totals
-cannot drift from the line items they came from.
+`src/lib/invoice-math.ts` and re-derived in the model's `pre('validate')` hook,
+so totals cannot drift from the line items they came from. **The form previews
+totals in the browser using that same module**, so what you see while typing is
+what the database computes on save — the maths deliberately lives outside
+`models/Invoice.ts` so importing it client-side does not pull in Mongoose.
+
+Line totals submitted by the browser are ignored on the server and recomputed
+from quantity, rate and tax rate. The preview is a convenience, never the
+source of truth.
 
 Two decisions worth knowing:
 
@@ -132,6 +141,18 @@ Two decisions worth knowing:
 Line items also store a **snapshot** of the item (description, HSN/SAC, unit
 price, tax rate) rather than only a reference. Editing or deleting an item later
 never rewrites an invoice you already sent.
+
+### Invoice status
+
+You pick a status on the form, but it is reconciled against the balance on save
+by `derivePaymentStatus()`: fully paid becomes `paid`, part paid becomes
+`partially_paid`, and unpaid past its due date becomes `overdue`. `draft` and
+`cancelled` are deliberate states and are never overridden. This stops an
+invoice sitting at "sent" while fully paid.
+
+Marking an invoice paid from the detail page also settles the balance —
+otherwise the dashboard would show it as paid while still counting it as
+outstanding.
 
 ### Invoice numbering
 
