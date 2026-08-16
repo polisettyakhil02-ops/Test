@@ -10,9 +10,11 @@
     "create-admin": "tsx scripts/create-admin.ts",
     "verify-models": "tsx scripts/verify-models.ts",
     "verify-lib": "tsx scripts/verify-lib.ts",
-    "verify": "npm run verify-models && npm run verify-lib"
+    "verify": "npm run verify-models && npm run verify-lib",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.5",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-label": "^2.1.15",
     "@radix-ui/react-select": "^2.3.7",
@@ -21,10 +23,12 @@
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.31.0",
     "mongoose": "^9.9.2",
     "next": "16.3.1",
     "next-auth": "^5.0.0-beta.32",
+    "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sonner": "^2.0.8",
@@ -39,6 +43,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
     "tailwindcss": "^4",
