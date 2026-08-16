@@ -1,6 +1,6 @@
 import type { DefaultSession } from 'next-auth'
 
-type UserRole = 'admin' | 'staff'
+type UserRole = 'admin' | 'accountant' | 'viewer'
 
 // `next-auth` and `next-auth/jwt` are thin `export *` re-exports of
 // `@auth/core/*`, and the callback signatures in @auth/core reference the

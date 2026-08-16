@@ -2,31 +2,21 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { isValidObjectId } from 'mongoose'
-import { auth } from '@/auth'
-import { connectToDatabase } from '@/lib/mongodb'
-import { Client } from '@/models/Client'
-import { Invoice } from '@/models/Invoice'
-import { clientSchema, fieldErrors } from '@/lib/validation'
+import { and, eq, sql } from 'drizzle-orm'
+import { db } from '@/db'
+import { documents, parties } from '@/db/schema'
+import { requireRole } from '@/lib/session'
+import { partySchema, fieldErrors } from '@/lib/validation'
+import { recordAudit } from '@/domain/posting'
 import type { FormState, DeleteResult } from '@/lib/form-state'
 
-/**
- * Server Actions are public HTTP endpoints -- being rendered inside a
- * protected layout does not protect the action itself. Every one re-checks.
- */
-async function requireSession() {
-  const session = await auth()
-  if (!session?.user) {
-    redirect('/login')
-  }
-}
-
 function parseForm(formData: FormData) {
-  return clientSchema.safeParse({
+  return partySchema.safeParse({
     name: formData.get('name'),
     email: formData.get('email'),
     phone: formData.get('phone'),
     gstin: formData.get('gstin'),
+    stateCode: formData.get('stateCode'),
     notes: formData.get('notes'),
     billingAddress: {
       line1: formData.get('line1'),
@@ -39,12 +29,11 @@ function parseForm(formData: FormData) {
   })
 }
 
-export async function createClient(
-  _prevState: FormState,
+export async function createParty(
+  _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  await requireSession()
-
+  const session = await requireRole('accountant')
   const parsed = parseForm(formData)
 
   if (!parsed.success) {
@@ -52,92 +41,110 @@ export async function createClient(
   }
 
   try {
-    await connectToDatabase()
-    await Client.create(parsed.data)
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Could not save the client.',
-      fieldErrors: {},
-    }
-  }
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(parties)
+        .values({ ...parsed.data, entityId: session.entityId, gstin: parsed.data.gstin.toUpperCase() })
+        .returning()
 
-  revalidatePath('/dashboard/clients')
-  redirect('/dashboard/clients')
-}
-
-export async function updateClient(
-  id: string,
-  _prevState: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  await requireSession()
-
-  if (!isValidObjectId(id)) {
-    return { error: 'That client no longer exists.', fieldErrors: {} }
-  }
-
-  const parsed = parseForm(formData)
-
-  if (!parsed.success) {
-    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
-  }
-
-  try {
-    await connectToDatabase()
-    const updated = await Client.findByIdAndUpdate(id, parsed.data, {
-      new: true,
-      runValidators: true,
+      await recordAudit(tx, {
+        entityId: session.entityId,
+        actorId: session.userId,
+        actorEmail: session.email,
+        action: 'create',
+        recordType: 'party',
+        recordId: created.id,
+        after: created,
+      })
     })
-
-    if (!updated) {
-      return { error: 'That client no longer exists.', fieldErrors: {} }
-    }
   } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Could not save the client.',
-      fieldErrors: {},
-    }
+    return { error: error instanceof Error ? error.message : 'Could not save.', fieldErrors: {} }
   }
 
   revalidatePath('/dashboard/clients')
-  revalidatePath(`/dashboard/clients/${id}/edit`)
   redirect('/dashboard/clients')
 }
 
-export async function deleteClient(id: string): Promise<DeleteResult> {
-  await requireSession()
+export async function updateParty(
+  id: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const session = await requireRole('accountant')
+  const parsed = parseForm(formData)
 
-  if (!isValidObjectId(id)) {
-    return { ok: false, message: 'That client no longer exists.' }
+  if (!parsed.success) {
+    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
   }
 
   try {
-    await connectToDatabase()
+    await db.transaction(async (tx) => {
+      const [before] = await tx
+        .select()
+        .from(parties)
+        .where(and(eq(parties.entityId, session.entityId), eq(parties.id, id)))
+        .limit(1)
 
-    // Invoices snapshot their client, but the reference is still what links an
-    // invoice back to a live client record -- deleting one out from under an
-    // existing invoice would orphan it.
-    const invoiceCount = await Invoice.countDocuments({ client: id })
+      if (!before) throw new Error('That client no longer exists.')
 
-    if (invoiceCount > 0) {
+      const [after] = await tx
+        .update(parties)
+        .set({ ...parsed.data, gstin: parsed.data.gstin.toUpperCase() })
+        .where(eq(parties.id, id))
+        .returning()
+
+      await recordAudit(tx, {
+        entityId: session.entityId,
+        actorId: session.userId,
+        actorEmail: session.email,
+        action: 'update',
+        recordType: 'party',
+        recordId: id,
+        before,
+        after,
+      })
+    })
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Could not save.', fieldErrors: {} }
+  }
+
+  revalidatePath('/dashboard/clients')
+  redirect('/dashboard/clients')
+}
+
+export async function deleteParty(id: string): Promise<DeleteResult> {
+  const session = await requireRole('admin')
+
+  try {
+    const [{ count }] = await db
+      .select({ count: sql<string>`COUNT(*)` })
+      .from(documents)
+      .where(eq(documents.partyId, id))
+
+    // Documents snapshot the party, but the reference is what links a document
+    // back to a live record -- deleting it would orphan them.
+    if (Number(count) > 0) {
       return {
         ok: false,
-        message: `This client has ${invoiceCount} invoice${
-          invoiceCount === 1 ? '' : 's'
-        } and cannot be deleted.`,
+        message: `This client has ${count} document${Number(count) === 1 ? '' : 's'} and cannot be deleted.`,
       }
     }
 
-    const deleted = await Client.findByIdAndDelete(id)
-
-    if (!deleted) {
-      return { ok: false, message: 'That client no longer exists.' }
-    }
+    await db.transaction(async (tx) => {
+      const [before] = await tx.select().from(parties).where(eq(parties.id, id)).limit(1)
+      await tx.delete(parties).where(eq(parties.id, id))
+      await recordAudit(tx, {
+        entityId: session.entityId,
+        actorId: session.userId,
+        actorEmail: session.email,
+        action: 'delete',
+        recordType: 'party',
+        recordId: id,
+        before,
+      })
+    })
   } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : 'Could not delete the client.',
-    }
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not delete.' }
   }
 
   revalidatePath('/dashboard/clients')

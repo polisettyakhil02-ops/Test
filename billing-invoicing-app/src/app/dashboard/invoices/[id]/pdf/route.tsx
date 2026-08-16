@@ -1,14 +1,11 @@
-import { isValidObjectId } from 'mongoose'
 import { renderToBuffer } from '@react-pdf/renderer'
-import { auth } from '@/auth'
-import { connectToDatabase } from '@/lib/mongodb'
-import { Invoice } from '@/models/Invoice'
-import { toInvoiceDTO } from '@/lib/dto'
-import { getCompanyDetails } from '@/lib/company'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { entities } from '@/db/schema'
+import { requireSession } from '@/lib/session'
+import { getDocument } from '@/lib/queries'
 import { InvoicePdf } from '@/lib/pdf/invoice-pdf'
 
-// The PDF is generated per request from live data and must never be cached or
-// prerendered; @react-pdf/renderer also needs the Node runtime.
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
@@ -16,39 +13,67 @@ export async function GET(
   request: Request,
   context: RouteContext<'/dashboard/invoices/[id]/pdf'>,
 ) {
-  // proxy.ts already guards /dashboard/*, but a route handler is a public
-  // endpoint in its own right, so check here too.
-  const session = await auth()
-
-  if (!session?.user) {
-    return new Response('Unauthorized', { status: 401 })
-  }
-
+  // proxy.ts guards /dashboard/*, but a route handler is a public endpoint in
+  // its own right.
+  const session = await requireSession()
   const { id } = await context.params
 
-  if (!isValidObjectId(id)) {
-    return new Response('Not found', { status: 404 })
-  }
+  const found = await getDocument(session.entityId, id).catch(() => null)
+  if (!found) return new Response('Not found', { status: 404 })
 
-  await connectToDatabase()
-  const doc = await Invoice.findById(id).lean()
-
-  if (!doc) {
-    return new Response('Not found', { status: 404 })
-  }
-
-  const invoice = toInvoiceDTO(doc as Parameters<typeof toInvoiceDTO>[0])
-  const company = getCompanyDetails()
+  const [org] = await db
+    .select()
+    .from(entities)
+    .where(eq(entities.id, session.entityId))
+    .limit(1)
 
   const buffer = await renderToBuffer(
-    <InvoicePdf invoice={invoice} company={company} />,
+    <InvoicePdf
+      invoice={{
+        docType: found.doc.docType,
+        docNumber: found.doc.docNumber,
+        status: found.doc.status,
+        partySnapshot: found.doc.partySnapshot,
+        issueDate: found.doc.issueDate,
+        dueDate: found.doc.dueDate,
+        subtotalMinor: found.doc.subtotalMinor,
+        discountMinor: found.doc.discountMinor,
+        totalMinor: found.doc.totalMinor,
+        allocatedMinor: found.allocatedMinor,
+        discountType: found.doc.discountType,
+        discountValue: found.doc.discountValue,
+        supplyKind: found.doc.supplyKind,
+        notes: found.doc.notes,
+        terms: found.doc.terms,
+        lines: found.lines.map((line) => ({
+          id: line.id,
+          description: line.description,
+          hsnSac: line.hsnSac,
+          unit: line.unit,
+          quantity: line.quantity,
+          unitPriceMinor: line.unitPriceMinor,
+          taxRatePercent: line.taxRatePercent,
+          lineSubtotalMinor: line.lineSubtotalMinor,
+          lineDiscountMinor: line.lineDiscountMinor,
+          lineTaxMinor: line.lineTaxMinor,
+          lineTotalMinor: line.lineTotalMinor,
+        })),
+      }}
+      company={{
+        name: org?.name ?? 'Company',
+        addressLines: org?.addressLines ?? [],
+        gstin: org?.gstin ?? '',
+        email: org?.email ?? '',
+        phone: org?.phone ?? '',
+        bankDetails: org?.bankDetails ?? '',
+        footerNote: 'This is a computer-generated document.',
+      }}
+    />,
   )
 
-  // `inline` opens it in the browser's viewer, which is also how you print it.
-  // `?download=1` forces a save instead.
   const url = new URL(request.url)
   const disposition = url.searchParams.get('download') ? 'attachment' : 'inline'
-  const filename = `${invoice.invoiceNumber}.pdf`
+  const filename = `${found.doc.docNumber ?? 'draft'}.pdf`
 
   return new Response(new Uint8Array(buffer), {
     headers: {

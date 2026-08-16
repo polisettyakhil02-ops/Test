@@ -1,9 +1,11 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
+import bcrypt from 'bcryptjs'
 import { z } from 'zod'
+import { sql } from 'drizzle-orm'
 import { authConfig } from '@/auth.config'
-import { connectToDatabase } from '@/lib/mongodb'
-import { User } from '@/models/User'
+import { db } from '@/db'
+import { users } from '@/db/schema'
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -20,34 +22,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(rawCredentials) {
         const parsed = credentialsSchema.safeParse(rawCredentials)
-
-        if (!parsed.success) {
-          return null
-        }
+        if (!parsed.success) return null
 
         const { email, password } = parsed.data
 
-        await connectToDatabase()
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(sql`lower(${users.email}) = ${email.toLowerCase()}`)
+          .limit(1)
 
-        // passwordHash has `select: false` on the schema, so it must be opted in.
-        const user = await User.findOne({ email: email.toLowerCase() }).select(
-          '+passwordHash',
-        )
+        if (!user || !user.isActive) return null
 
-        if (!user) {
-          return null
-        }
+        const matches = await bcrypt.compare(password, user.passwordHash)
+        if (!matches) return null
 
-        const passwordMatches = await user.comparePassword(password)
-
-        if (!passwordMatches) {
-          return null
-        }
-
-        // Returning null for every failure means the login form cannot tell
-        // "no such account" apart from "wrong password" -- don't leak which.
+        // Returning null for every failure means the form cannot tell "no such
+        // account" from "wrong password" -- don't leak which.
         return {
-          id: user._id.toString(),
+          id: user.id,
           name: user.name,
           email: user.email,
           role: user.role,
@@ -56,3 +49,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
 })
+

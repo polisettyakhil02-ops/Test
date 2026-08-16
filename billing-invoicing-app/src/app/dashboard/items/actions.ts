@@ -2,21 +2,14 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { isValidObjectId } from 'mongoose'
-import { auth } from '@/auth'
-import { connectToDatabase } from '@/lib/mongodb'
-import { Item } from '@/models/Item'
-import { Invoice } from '@/models/Invoice'
+import { and, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { items } from '@/db/schema'
+import { requireRole } from '@/lib/session'
 import { itemSchema, fieldErrors } from '@/lib/validation'
+import { parseMinor } from '@/domain/money'
+import { recordAudit } from '@/domain/posting'
 import type { FormState, DeleteResult } from '@/lib/form-state'
-
-/** Server Actions are public endpoints; the protected layout does not cover them. */
-async function requireSession() {
-  const session = await auth()
-  if (!session?.user) {
-    redirect('/login')
-  }
-}
 
 function parseForm(formData: FormData) {
   return itemSchema.safeParse({
@@ -24,34 +17,46 @@ function parseForm(formData: FormData) {
     description: formData.get('description'),
     hsnSac: formData.get('hsnSac'),
     unit: formData.get('unit'),
-    price: formData.get('price'),
-    taxRate: formData.get('taxRate'),
+    unitPrice: formData.get('unitPrice'),
+    taxRatePercent: formData.get('taxRatePercent'),
   })
 }
 
-export async function createItem(
-  _prevState: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  await requireSession()
-
+export async function createItem(_prev: FormState, formData: FormData): Promise<FormState> {
+  const session = await requireRole('accountant')
   const parsed = parseForm(formData)
 
   if (!parsed.success) {
-    return {
-      error: 'Please fix the highlighted fields.',
-      fieldErrors: fieldErrors(parsed.error),
-    }
+    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
   }
 
   try {
-    await connectToDatabase()
-    await Item.create(parsed.data)
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(items)
+        .values({
+          entityId: session.entityId,
+          name: parsed.data.name,
+          description: parsed.data.description,
+          hsnSac: parsed.data.hsnSac,
+          unit: parsed.data.unit,
+          unitPriceMinor: parseMinor(parsed.data.unitPrice),
+          defaultTaxRatePercent: parsed.data.taxRatePercent,
+        })
+        .returning()
+
+      await recordAudit(tx, {
+        entityId: session.entityId,
+        actorId: session.userId,
+        actorEmail: session.email,
+        action: 'create',
+        recordType: 'item',
+        recordId: created.id,
+        after: created,
+      })
+    })
   } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Could not save the item.',
-      fieldErrors: {},
-    }
+    return { error: error instanceof Error ? error.message : 'Could not save.', fieldErrors: {} }
   }
 
   revalidatePath('/dashboard/items')
@@ -60,77 +65,79 @@ export async function createItem(
 
 export async function updateItem(
   id: string,
-  _prevState: FormState,
+  _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  await requireSession()
-
-  if (!isValidObjectId(id)) {
-    return { error: 'That item no longer exists.', fieldErrors: {} }
-  }
-
+  const session = await requireRole('accountant')
   const parsed = parseForm(formData)
 
   if (!parsed.success) {
-    return {
-      error: 'Please fix the highlighted fields.',
-      fieldErrors: fieldErrors(parsed.error),
-    }
+    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
   }
 
   try {
-    await connectToDatabase()
-    const updated = await Item.findByIdAndUpdate(id, parsed.data, {
-      new: true,
-      runValidators: true,
-    })
+    await db.transaction(async (tx) => {
+      const [before] = await tx
+        .select()
+        .from(items)
+        .where(and(eq(items.entityId, session.entityId), eq(items.id, id)))
+        .limit(1)
 
-    if (!updated) {
-      return { error: 'That item no longer exists.', fieldErrors: {} }
-    }
+      if (!before) throw new Error('That item no longer exists.')
+
+      const [after] = await tx
+        .update(items)
+        .set({
+          name: parsed.data.name,
+          description: parsed.data.description,
+          hsnSac: parsed.data.hsnSac,
+          unit: parsed.data.unit,
+          unitPriceMinor: parseMinor(parsed.data.unitPrice),
+          defaultTaxRatePercent: parsed.data.taxRatePercent,
+        })
+        .where(eq(items.id, id))
+        .returning()
+
+      await recordAudit(tx, {
+        entityId: session.entityId,
+        actorId: session.userId,
+        actorEmail: session.email,
+        action: 'update',
+        recordType: 'item',
+        recordId: id,
+        before,
+        after,
+      })
+    })
   } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Could not save the item.',
-      fieldErrors: {},
-    }
+    return { error: error instanceof Error ? error.message : 'Could not save.', fieldErrors: {} }
   }
 
   revalidatePath('/dashboard/items')
-  revalidatePath(`/dashboard/items/${id}/edit`)
   redirect('/dashboard/items')
 }
 
 export async function deleteItem(id: string): Promise<DeleteResult> {
-  await requireSession()
-
-  if (!isValidObjectId(id)) {
-    return { ok: false, message: 'That item no longer exists.' }
-  }
+  const session = await requireRole('admin')
 
   try {
-    await connectToDatabase()
-
-    const deleted = await Item.findByIdAndDelete(id)
-
-    if (!deleted) {
-      return { ok: false, message: 'That item no longer exists.' }
-    }
-
-    // Unlike clients, items are safe to delete -- invoice lines snapshot the
-    // description, price and tax rate, so past invoices still render exactly
-    // as issued. MongoDB has no cascading delete though, so the line's `item`
-    // reference would dangle; clear it explicitly rather than leave a pointer
-    // to a document that no longer exists.
-    await Invoice.updateMany(
-      { 'lineItems.item': id },
-      { $set: { 'lineItems.$[line].item': null } },
-      { arrayFilters: [{ 'line.item': id }] },
-    )
+    await db.transaction(async (tx) => {
+      const [before] = await tx.select().from(items).where(eq(items.id, id)).limit(1)
+      // Safe to delete: document lines snapshot the item's details, and the
+      // line's item_id is ON DELETE SET NULL, so issued documents are untouched.
+      await tx.delete(items).where(eq(items.id, id))
+      await recordAudit(tx, {
+        entityId: session.entityId,
+        actorId: session.userId,
+        actorEmail: session.email,
+        action: 'delete',
+        recordType: 'item',
+        recordId: id,
+        before,
+      })
+    })
   } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : 'Could not delete the item.',
-    }
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not delete.' }
   }
 
   revalidatePath('/dashboard/items')

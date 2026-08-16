@@ -231,6 +231,9 @@ export const items = pgTable(
     hsnSac: text('hsn_sac').notNull().default(''),
     unit: text('unit').notNull().default('unit'),
     unitPriceMinor: bigint('unit_price_minor', { mode: 'number' }).notNull().default(0),
+    // The rate copied onto a new invoice line. Lines snapshot it, so changing
+    // it here never alters a document already raised.
+    defaultTaxRatePercent: text('default_tax_rate_percent').notNull().default('0'),
     taxCodeId: uuid('tax_code_id').references(() => taxCodes.id, { onDelete: 'set null' }),
     incomeAccountId: uuid('income_account_id').references(() => accounts.id, {
       onDelete: 'set null',

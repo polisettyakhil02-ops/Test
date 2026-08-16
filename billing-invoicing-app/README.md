@@ -1,10 +1,12 @@
 # Billing & Invoicing
 
-Internal single-tenant billing and invoicing tool. All data belongs to one
-company — there are no tenant/company scoping columns anywhere by design.
+Internal single-tenant billing system built on a **double-entry general ledger**.
+Invoices, credit notes and payments are documents that post balanced journal
+entries; every report is derived from those entries rather than from the
+documents themselves.
 
 **Stack:** Next.js 16 (App Router) · React 19 · Tailwind v4 · shadcn/ui ·
-MongoDB + Mongoose 9 · NextAuth (Auth.js v5) with the Credentials provider.
+PostgreSQL + Drizzle · Auth.js v5.
 
 ## Setup
 
@@ -12,18 +14,20 @@ MongoDB + Mongoose 9 · NextAuth (Auth.js v5) with the Credentials provider.
 npm install
 
 cp .env.example .env.local
-npx auth secret          # writes AUTH_SECRET into .env.local
-# then set MONGODB_URI in .env.local
+npx auth secret              # writes AUTH_SECRET
+# set DATABASE_URL to your PostgreSQL instance
 
-npm run create-admin -- --email you@company.com --password "your-password" --name "Your Name"
+npm run setup -- --email you@company.com --password "your-password" \
+                 --company "Acme Pvt Ltd" --state 29
 
 npm run dev
 ```
 
-Open http://localhost:3000 — you'll be redirected to `/login`.
+`npm run setup` applies the migrations and ledger guards, then creates the
+entity, an eight-account chart of accounts, twelve monthly periods, the number
+series and your admin user. It is safe to re-run.
 
-There is no public sign-up. `npm run create-admin` is the only way to create an
-account; re-running it with an existing email resets that user's password.
+There is no public sign-up.
 
 ## Scripts
 
@@ -31,163 +35,102 @@ account; re-running it with an existing email resets that user's password.
 |---|---|
 | `npm run dev` | Dev server |
 | `npm run build` | Production build |
-| `npm run create-admin` | Creates or updates an admin user |
-| `npm run verify` | All offline checks (no DB needed) |
-| `npm run verify-models` | Schema validation and invoice arithmetic |
-| `npm run verify-lib` | Form validation, search escaping, DTO mapping |
+| `npm run setup` | Migrations, seed data and the admin user |
+| `npm test` | Ledger integration tests against real PostgreSQL |
+| `npm run db:generate` | Regenerate migrations after a schema change |
 | `npm run lint` | ESLint |
 
-## Layout
+## The ledger is the source of truth
+
+A document is a request to change the books; the ledger is the record of what
+happened. Posting is a one-way door:
 
 ```
-src/
-  auth.ts            NextAuth instance (Credentials provider, hits MongoDB)
-  auth.config.ts     DB-free half of the config, shared with proxy.ts
-  proxy.ts           Route protection (Next.js 16's renamed middleware)
-  lib/mongodb.ts     Cached Mongoose connection
-  models/            User, Client, Item, Invoice, Counter
-  lib/validation.ts  Zod schemas shared by every form and server action
-  lib/dto.ts         Mongoose document -> JSON-safe DTO mapping
-  lib/metrics.ts     Dashboard aggregation queries
-  lib/invoice-math.ts  Invoice arithmetic, shared by server and browser
-  lib/company.ts       Your business details, read from env
-  lib/pdf/             A4 invoice PDF document
-  app/login/         Login page + sign-in server action
-  app/dashboard/     Protected shell: sidebar, nav, log out
-    page.tsx         Metrics, counts, recent invoices
-    clients/         List, search, create, edit, delete
-    items/           List, search, create, edit, delete
-    invoices/        List, filter, create, edit, view, delete
-      [id]/pdf/      Route handler that renders the A4 PDF
+draft ──post──▶ posted ──void──▶ voided
+  │                │
+  └─ editable      └─ immutable; corrected with a credit note
 ```
 
-### PDF export
+Posting takes a number, checks the period is open, writes a balanced journal
+entry, records an audit row and queues an outbound event — **all in one
+transaction**. If any part fails, none of it happened; in particular the invoice
+number is returned rather than burned, because a gap in an invoice sequence is
+something a tax authority expects you to explain.
 
-Each invoice has **View PDF** (opens in the browser's viewer, which is also how
-you print) and **Download**. Both hit `/dashboard/invoices/<id>/pdf`; the
-download button just adds `?download=1`, which flips `Content-Disposition` from
-`inline` to `attachment`.
+An invoice posts `Dr Accounts Receivable / Cr Sales / Cr GST Output`. A payment
+posts `Dr Bank / Cr Accounts Receivable`. A credit note posts the reverse of the
+invoice, which is why raising one reduces revenue with no special case anywhere.
 
-Rendering happens server-side with `@react-pdf/renderer`, so the PDF is real
-vector output with selectable text — not a screenshot of the page. It paginates
-automatically, repeating the table header and the footer on every page.
+A customer's balance is not a column: it is the sum of their AR journal lines,
+so it cannot disagree with the books.
 
-Your own business details (the "from" side) come from `COMPANY_*` environment
-variables — single-tenant, so they are configuration rather than data. See
-`.env.example`.
+## Invariants live in the database
 
-**The PDF says `INR 1,234.00`, not `₹1,234.00`, on purpose.** The PDF base-14
-fonts use WinAnsi encoding, which has no rupee sign (U+20B9); it silently
-renders as a superscript one. This was confirmed by extracting text from a
-generated PDF. The web UI keeps the real symbol, since browsers have fonts that
-cover it. To use `₹` in the PDF you would need to register and embed a font
-that includes the glyph.
+These are enforced by PostgreSQL, not by application code, so no future code
+path — or `psql` session — can bypass them. See `src/db/ledger-guards.sql`.
 
-One layout gotcha worth knowing if you edit `lib/pdf/invoice-pdf.tsx`: do not
-set `lineHeight` on the `Page` style. It is inherited by the absolutely
-positioned footer and inflates its computed height enough that the footer
-silently never renders at all. Set line spacing on the individual paragraph
-blocks instead.
+| Rule | Mechanism |
+|---|---|
+| Debits equal credits | `DEFERRABLE INITIALLY DEFERRED` constraint trigger, checked at COMMIT |
+| The ledger is append-only | Triggers refusing `UPDATE`/`DELETE` on journal tables |
+| Posted documents are frozen | Trigger allowing only the void stamp through |
+| An invoice cannot be over-allocated | Deferred trigger comparing allocations to the total |
+| A line is a debit or a credit, never both | `CHECK` constraint |
 
-### Dashboard metrics
+Balance is deferred deliberately: lines are inserted one at a time, so an entry
+is legitimately unbalanced mid-transaction. COMMIT is the only moment the rule
+is meaningful.
 
-"Total revenue" is money actually received (`amountPaid`), not merely billed —
-the amount billed is shown underneath as context. Cancelled invoices are
-excluded from every figure: they are neither revenue nor owed.
+## Money
 
-"Overdue" is computed from the due date and the balance rather than trusting
-the stored status, so an invoice that has quietly gone past due still counts
-without a nightly job having to flip its status first.
+Every amount is a `bigint` of **minor units** (paise). There are no floats and
+no `round2()` helper — the problem is designed out rather than patched at each
+boundary. `src/domain/money.ts` holds the integer arithmetic, including
+largest-remainder apportionment so a split discount always sums back exactly.
 
-Two details that would otherwise bite on a fresh install: a `$group`
-aggregation over zero matching documents returns an **empty array**, so reading
-`rows[0]` directly crashes on first login — `summarizeTotals()` handles that and
-is covered by tests. And a recent-invoice row prefers the client-name snapshot
-taken at issue time over the live record, so renaming a client never rewrites
-invoices already sent.
+## GST
 
-### Why DTOs
+`src/domain/pricing.ts` resolves the supply kind from the seller's and buyer's
+state codes, then splits tax into the components an invoice legally has to show:
+**CGST + SGST** at half the rate each within a state, a single **IGST** at the
+full rate across states. The two halves are computed so they reconstitute the
+total to the paisa.
 
-Mongoose `.lean()` results still hold `ObjectId` and `Date` instances, which
-cannot cross the server/client boundary — React rejects them with *"Only plain
-objects … can be passed to Client Components"*. `lib/dto.ts` maps documents to
-plain shapes before anything reaches a Client Component.
+Tax is charged on the **post-discount** amount. Charging it on the pre-discount
+value overstates GST on every discounted invoice.
 
-### Deleting
+## Testing
 
-Deleting a **client** is refused while any invoice references it, so an invoice
-can never be orphaned. Deleting an **item** is allowed: invoice lines snapshot
-the item's description, price and tax rate, so past invoices are unaffected.
-Because MongoDB has no cascading delete, the now-dangling `item` reference on
-those lines is cleared explicitly rather than left pointing at a deleted
-document.
+`npm test` runs the ledger against **real PostgreSQL 18**, in-process via
+PGlite (WASM) — not a mock, not SQLite. The constraints and triggers under test
+are the ones production gets, which is why these three cases are testable at
+all:
 
-### Search
+- a rolled-back posting does not consume an invoice number
+- eight concurrent postings never issue the same number
+- a posting refused by a closed period writes nothing whatsoever
 
-`?q=` is turned into a case-insensitive substring regex by
-`lib/search.ts`. Regex metacharacters are escaped first — otherwise a query of
-`(` is invalid regex syntax and would 500 the page, and a pattern like `(a+)+`
-is a denial-of-service vector.
+## Reports
 
-### A note on `proxy.ts`
+Trial balance, ageing, party balance and P&L all read the journal, so two
+reports cannot disagree. The trial balance page states plainly whether the
+books balance; if it ever says they do not, the ledger is corrupt.
 
-In Next.js 16 the `middleware` file convention was **renamed to `proxy`**. This
-file is the direct equivalent — same behavior, current filename. Tutorials
-written for Next 15 and earlier will tell you to create `middleware.ts`; that
-name is deprecated here.
+## Roles
 
-### Two-layer route protection
+`admin` > `accountant` > `viewer`. Server Actions are public HTTP endpoints, so
+every write calls `requireRole()` — rendering inside a protected layout does not
+protect the action itself. Voiding a posted document is admin-only.
 
-`proxy.ts` verifies the session JWT and redirects anonymous requests to
-`/login`, preserving where they were headed via `?callbackUrl=`. It is
-instantiated from `auth.config.ts`, which imports no Mongoose and no bcrypt, so
-guarding a route never opens a database connection.
+## A note on `proxy.ts`
 
-`app/dashboard/layout.tsx` then calls `auth()` again in the render path. That is
-the authoritative check — no dashboard page can render without a real session,
-even if the proxy were bypassed.
+In Next.js 16 the `middleware` convention was **renamed to `proxy`**. This file
+is the direct equivalent. Tutorials for Next 15 and earlier will tell you to
+create `middleware.ts`; that name is deprecated here.
 
-### Money handling
+## Not built yet
 
-Every derived amount on an invoice (line subtotals, apportioned discount, tax,
-total, amount due) is computed by `recalculateInvoice()` in
-`src/lib/invoice-math.ts` and re-derived in the model's `pre('validate')` hook,
-so totals cannot drift from the line items they came from. **The form previews
-totals in the browser using that same module**, so what you see while typing is
-what the database computes on save — the maths deliberately lives outside
-`models/Invoice.ts` so importing it client-side does not pull in Mongoose.
-
-Line totals submitted by the browser are ignored on the server and recomputed
-from quantity, rate and tax rate. The preview is a convenience, never the
-source of truth.
-
-Two decisions worth knowing:
-
-- **Tax is charged on the post-discount amount.** Taxing the pre-discount value
-  would overstate GST on every discounted invoice.
-- **An invoice-level discount is apportioned across lines by share of subtotal**,
-  with the rounding remainder pushed onto the last line, so the per-line
-  discounts always sum to the invoice discount exactly.
-
-Line items also store a **snapshot** of the item (description, HSN/SAC, unit
-price, tax rate) rather than only a reference. Editing or deleting an item later
-never rewrites an invoice you already sent.
-
-### Invoice status
-
-You pick a status on the form, but it is reconciled against the balance on save
-by `derivePaymentStatus()`: fully paid becomes `paid`, part paid becomes
-`partially_paid`, and unpaid past its due date becomes `overdue`. `draft` and
-`cancelled` are deliberate states and are never overridden. This stops an
-invoice sitting at "sent" while fully paid.
-
-Marking an invoice paid from the detail page also settles the balance —
-otherwise the dashboard would show it as paid while still counting it as
-outstanding.
-
-### Invoice numbering
-
-MongoDB has no sequences, and "count documents + 1" races under concurrent
-writes. `src/models/Counter.ts` uses a single atomic `findOneAndUpdate` with
-`$inc`, so every invoice gets a distinct number (`INV-00001`, `INV-00002`, …).
-Change the prefix with `INVOICE_PREFIX` in `.env.local`.
+e-invoicing (IRN/QR) and GSTR-1 export · webhook delivery (outbox rows are
+written but nothing drains them) · customer statements · email delivery ·
+multi-currency · purchase side (bills, AP) · bank reconciliation · recurring
+invoices · approval workflows · custom fields · pagination beyond 200 rows.

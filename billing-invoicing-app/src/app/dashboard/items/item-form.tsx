@@ -9,11 +9,20 @@ import { emptyFormState, type FormState } from '@/lib/form-state'
 import { Field, TextareaField } from '@/components/field'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { ItemDTO } from '@/lib/dto'
+import { formatMinor } from '@/domain/money'
+
+type Item = {
+  id: string
+  name: string
+  description: string
+  hsnSac: string
+  unit: string
+  unitPriceMinor: number
+  defaultTaxRatePercent: string
+}
 
 function SubmitButton({ label }: { label: string }) {
   const { pending } = useFormStatus()
-
   return (
     <Button type="submit" disabled={pending}>
       {pending ? <Loader2 className="animate-spin" /> : null}
@@ -22,12 +31,11 @@ function SubmitButton({ label }: { label: string }) {
   )
 }
 
-export function ItemForm({ item }: { item?: ItemDTO }) {
+export function ItemForm({ item }: { item?: Item }) {
   const isEdit = Boolean(item)
-
   const action = isEdit
     ? updateItem.bind(null, item!.id)
-    : (createItem as (state: FormState, formData: FormData) => Promise<FormState>)
+    : (createItem as (s: FormState, f: FormData) => Promise<FormState>)
 
   const [state, formAction] = useActionState(action, emptyFormState)
   const errors = state.fieldErrors
@@ -40,51 +48,32 @@ export function ItemForm({ item }: { item?: ItemDTO }) {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <Field
-              name="name"
-              label="Name"
-              defaultValue={item?.name}
-              error={errors.name}
-              placeholder="Design retainer"
-              required
-            />
+            <Field name="name" label="Name" defaultValue={item?.name} error={errors.name} placeholder="Design retainer" required />
           </div>
+          <Field name="hsnSac" label="HSN / SAC code" defaultValue={item?.hsnSac} error={errors.hsnSac} placeholder="998314" />
+          <Field name="unit" label="Unit" defaultValue={item?.unit ?? 'unit'} error={errors.unit} placeholder="hour, unit, month" />
           <Field
-            name="hsnSac"
-            label="HSN / SAC code"
-            defaultValue={item?.hsnSac}
-            error={errors.hsnSac}
-            placeholder="998314"
-          />
-          <Field
-            name="unit"
-            label="Unit"
-            defaultValue={item?.unit ?? 'unit'}
-            error={errors.unit}
-            placeholder="hour, unit, month"
-          />
-          <Field
-            name="price"
+            name="unitPrice"
             label="Price"
             type="number"
             step="0.01"
             min="0"
             inputMode="decimal"
-            defaultValue={item?.price ?? 0}
-            error={errors.price}
+            defaultValue={item ? formatMinor(item.unitPriceMinor) : '0.00'}
+            error={errors.unitPrice}
             required
           />
           <Field
-            name="taxRate"
+            name="taxRatePercent"
             label="Tax rate (%)"
             type="number"
             step="0.01"
             min="0"
             max="100"
             inputMode="decimal"
-            defaultValue={item?.taxRate ?? 0}
-            error={errors.taxRate}
-            hint="GST percentage, e.g. 18 for 18%."
+            defaultValue={item?.defaultTaxRatePercent ?? '18'}
+            error={errors.taxRatePercent}
+            hint="Split into CGST+SGST or IGST by place of supply."
             required
           />
           <div className="sm:col-span-2">

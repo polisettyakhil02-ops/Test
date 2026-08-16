@@ -1,9 +1,48 @@
 import React from 'react'
 import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
-import { taxBreakdown } from '@/lib/invoice-math'
-import { formatCurrencyPlain, formatDate, INVOICE_STATUS_LABELS } from '@/lib/dto'
-import type { InvoiceDTO } from '@/lib/dto'
-import type { CompanyDetails } from '@/lib/company'
+import { taxSummary, type PricedLine } from '@/domain/pricing'
+import { formatMoneyPlain, formatDate } from '@/lib/dto'
+
+export interface PdfCompany {
+  name: string
+  addressLines: string[]
+  gstin: string
+  email: string
+  phone: string
+  bankDetails: string
+  footerNote: string
+}
+
+export interface PdfDocument {
+  docType: string
+  docNumber: string | null
+  status: string
+  partySnapshot: { name: string; email: string; phone: string; gstin: string; address: string }
+  issueDate: string
+  dueDate: string | null
+  subtotalMinor: number
+  discountMinor: number
+  totalMinor: number
+  allocatedMinor: number
+  discountType: string
+  discountValue: string
+  supplyKind: string
+  notes: string
+  terms: string
+  lines: Array<{
+    id: string
+    description: string
+    hsnSac: string
+    unit: string
+    quantity: string
+    unitPriceMinor: number
+    taxRatePercent: string
+    lineSubtotalMinor: number
+    lineDiscountMinor: number
+    lineTaxMinor: number
+    lineTotalMinor: number
+  }>
+}
 
 // Helvetica is one of the PDF base-14 fonts, so nothing has to be embedded or
 // downloaded at render time. See formatCurrencyPlain() for the encoding caveat
@@ -117,19 +156,56 @@ const styles = StyleSheet.create({
 })
 
 interface InvoicePdfProps {
-  invoice: InvoiceDTO
-  company: CompanyDetails
+  invoice: PdfDocument
+  company: PdfCompany
 }
 
 export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
-  const breakdown = taxBreakdown(invoice.lineItems)
-  const isCancelled = invoice.status === 'cancelled'
+  const breakdown = taxSummary(
+    invoice.lines.map(
+      (line): PricedLine => ({
+        lineSubtotalMinor: line.lineSubtotalMinor,
+        lineDiscountMinor: line.lineDiscountMinor,
+        lineTaxMinor: line.lineTaxMinor,
+        lineTotalMinor: line.lineTotalMinor,
+        taxes:
+          line.lineTaxMinor > 0
+            ? invoice.supplyKind === 'inter_state'
+              ? [
+                  {
+                    component: 'IGST' as const,
+                    ratePercent: line.taxRatePercent,
+                    taxableMinor: line.lineSubtotalMinor - line.lineDiscountMinor,
+                    amountMinor: line.lineTaxMinor,
+                  },
+                ]
+              : [
+                  {
+                    component: 'CGST' as const,
+                    ratePercent: String(Number(line.taxRatePercent) / 2),
+                    taxableMinor: line.lineSubtotalMinor - line.lineDiscountMinor,
+                    amountMinor: Math.floor(line.lineTaxMinor / 2),
+                  },
+                  {
+                    component: 'SGST' as const,
+                    ratePercent: String(Number(line.taxRatePercent) / 2),
+                    taxableMinor: line.lineSubtotalMinor - line.lineDiscountMinor,
+                    amountMinor: line.lineTaxMinor - Math.floor(line.lineTaxMinor / 2),
+                  },
+                ]
+            : [],
+      }),
+    ),
+  )
+  const isCancelled = invoice.status === 'voided'
+  const isCredit = invoice.docType === 'credit_note'
+  const amountDueMinor = invoice.totalMinor - invoice.allocatedMinor
 
   return (
     <Document
-      title={`${invoice.invoiceNumber} — ${invoice.clientSnapshot.name}`}
+      title={`${invoice.docNumber ?? 'Draft'} — ${invoice.partySnapshot.name}`}
       author={company.name}
-      subject={`Invoice ${invoice.invoiceNumber}`}
+      subject={`${invoice.docType} ${invoice.docNumber ?? ''}`}
     >
       <Page size="A4" style={styles.page}>
         <View style={styles.header} fixed>
@@ -147,11 +223,11 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
 
           <View style={styles.headerRight}>
             <Text style={styles.docTitle}>
-              {isCancelled ? 'CANCELLED INVOICE' : 'TAX INVOICE'}
+              {isCancelled ? 'VOIDED' : isCredit ? 'CREDIT NOTE' : 'TAX INVOICE'}
             </Text>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Invoice no.</Text>
-              <Text style={styles.metaValue}>{invoice.invoiceNumber}</Text>
+              <Text style={styles.metaValue}>{invoice.docNumber ?? 'DRAFT'}</Text>
             </View>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Issue date</Text>
@@ -164,9 +240,9 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
               </View>
             ) : null}
             <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Status</Text>
+              <Text style={styles.metaLabel}>Place of supply</Text>
               <Text style={styles.metaValue}>
-                {INVOICE_STATUS_LABELS[invoice.status] ?? invoice.status}
+                {invoice.supplyKind === 'inter_state' ? 'Inter-state' : 'Intra-state'}
               </Text>
             </View>
           </View>
@@ -175,25 +251,25 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
         <View style={styles.parties}>
           <View style={styles.partyBlock}>
             <Text style={styles.sectionLabel}>BILL TO</Text>
-            <Text style={styles.partyName}>{invoice.clientSnapshot.name || '-'}</Text>
-            {invoice.clientSnapshot.address ? (
-              <Text style={styles.muted}>{invoice.clientSnapshot.address}</Text>
+            <Text style={styles.partyName}>{invoice.partySnapshot.name || '-'}</Text>
+            {invoice.partySnapshot.address ? (
+              <Text style={styles.muted}>{invoice.partySnapshot.address}</Text>
             ) : null}
-            {invoice.clientSnapshot.gstin ? (
-              <Text style={styles.muted}>GSTIN {invoice.clientSnapshot.gstin}</Text>
+            {invoice.partySnapshot.gstin ? (
+              <Text style={styles.muted}>GSTIN {invoice.partySnapshot.gstin}</Text>
             ) : null}
-            {invoice.clientSnapshot.email ? (
-              <Text style={styles.muted}>{invoice.clientSnapshot.email}</Text>
+            {invoice.partySnapshot.email ? (
+              <Text style={styles.muted}>{invoice.partySnapshot.email}</Text>
             ) : null}
-            {invoice.clientSnapshot.phone ? (
-              <Text style={styles.muted}>{invoice.clientSnapshot.phone}</Text>
+            {invoice.partySnapshot.phone ? (
+              <Text style={styles.muted}>{invoice.partySnapshot.phone}</Text>
             ) : null}
           </View>
 
           <View style={[styles.partyBlock, { alignItems: 'flex-end' }]}>
             <Text style={styles.sectionLabel}>AMOUNT DUE</Text>
             <Text style={{ fontSize: 16, fontFamily: 'Helvetica-Bold' }}>
-              {formatCurrencyPlain(invoice.amountDue)}
+              {formatMoneyPlain(amountDueMinor)}
             </Text>
           </View>
         </View>
@@ -210,7 +286,7 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
             <Text style={[styles.th, styles.colAmount]}>Amount</Text>
           </View>
 
-          {invoice.lineItems.map((line, index) => (
+          {invoice.lines.map((line, index) => (
             <View key={line.id} style={styles.tableRow} wrap={false}>
               <Text style={styles.colIndex}>{index + 1}</Text>
               <Text style={styles.colDesc}>{line.description}</Text>
@@ -218,9 +294,9 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
               <Text style={styles.colQty}>
                 {line.quantity} {line.unit}
               </Text>
-              <Text style={styles.colRate}>{formatCurrencyPlain(line.unitPrice)}</Text>
-              <Text style={styles.colTax}>{line.taxRate}%</Text>
-              <Text style={styles.colAmount}>{formatCurrencyPlain(line.lineTotal)}</Text>
+              <Text style={styles.colRate}>{formatMoneyPlain(line.unitPriceMinor)}</Text>
+              <Text style={styles.colTax}>{line.taxRatePercent}%</Text>
+              <Text style={styles.colAmount}>{formatMoneyPlain(line.lineTotalMinor)}</Text>
             </View>
           ))}
         </View>
@@ -229,10 +305,10 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
           <View style={styles.totals}>
             <View style={styles.totalRow}>
               <Text style={styles.muted}>Subtotal</Text>
-              <Text>{formatCurrencyPlain(invoice.subtotal)}</Text>
+              <Text>{formatMoneyPlain(invoice.subtotalMinor)}</Text>
             </View>
 
-            {invoice.discountAmount > 0 ? (
+            {invoice.discountMinor > 0 ? (
               <View style={styles.totalRow}>
                 <Text style={styles.muted}>
                   Discount
@@ -240,34 +316,34 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
                     ? ` (${invoice.discountValue}%)`
                     : ''}
                 </Text>
-                <Text>-{formatCurrencyPlain(invoice.discountAmount)}</Text>
+                <Text>-{formatMoneyPlain(invoice.discountMinor)}</Text>
               </View>
             ) : null}
 
             {breakdown
-              .filter((row) => row.rate > 0)
+              .filter((row) => Number(row.ratePercent) > 0)
               .map((row) => (
-                <View key={row.rate} style={styles.totalRow}>
+                <View key={`${row.component}${row.ratePercent}`} style={styles.totalRow}>
                   <Text style={styles.muted}>
-                    Tax @ {row.rate}% on {formatCurrencyPlain(row.taxable)}
+                    {row.component} @ {row.ratePercent}% on {formatMoneyPlain(row.taxableMinor)}
                   </Text>
-                  <Text>{formatCurrencyPlain(row.tax)}</Text>
+                  <Text>{formatMoneyPlain(row.amountMinor)}</Text>
                 </View>
               ))}
 
             <View style={styles.grandRow}>
               <Text style={styles.grandText}>Total</Text>
-              <Text style={styles.grandText}>{formatCurrencyPlain(invoice.total)}</Text>
+              <Text style={styles.grandText}>{formatMoneyPlain(invoice.totalMinor)}</Text>
             </View>
 
             <View style={styles.totalRow}>
-              <Text style={styles.muted}>Paid</Text>
-              <Text>{formatCurrencyPlain(invoice.amountPaid)}</Text>
+              <Text style={styles.muted}>Settled</Text>
+              <Text>{formatMoneyPlain(invoice.allocatedMinor)}</Text>
             </View>
 
             <View style={styles.balanceRow}>
               <Text style={styles.bold}>Balance due</Text>
-              <Text style={styles.bold}>{formatCurrencyPlain(invoice.amountDue)}</Text>
+              <Text style={styles.bold}>{formatMoneyPlain(amountDueMinor)}</Text>
             </View>
           </View>
         </View>

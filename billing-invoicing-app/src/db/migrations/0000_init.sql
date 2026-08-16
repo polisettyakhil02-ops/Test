@@ -133,6 +133,7 @@ CREATE TABLE "items" (
 	"hsn_sac" text DEFAULT '' NOT NULL,
 	"unit" text DEFAULT 'unit' NOT NULL,
 	"unit_price_minor" bigint DEFAULT 0 NOT NULL,
+	"default_tax_rate_percent" text DEFAULT '0' NOT NULL,
 	"tax_code_id" uuid,
 	"income_account_id" uuid,
 	"is_active" boolean DEFAULT true NOT NULL,

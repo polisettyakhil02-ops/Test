@@ -7,11 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "create-admin": "tsx scripts/create-admin.ts",
-    "verify-models": "tsx scripts/verify-models.ts",
-    "verify-lib": "tsx scripts/verify-lib.ts",
-    "verify": "npm run verify-models && npm run verify-lib",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "setup": "tsx scripts/setup.ts",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.5",

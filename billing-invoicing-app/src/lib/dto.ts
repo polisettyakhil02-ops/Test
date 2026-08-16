@@ -1,191 +1,114 @@
-import type { IClient } from '@/models/Client'
-import type { IItem } from '@/models/Item'
-import type { IInvoice, IInvoiceLineItem } from '@/models/Invoice'
-import type { InvoiceStatus, DiscountType } from '@/lib/invoice-math'
+import { formatMinorIN } from '@/domain/money'
 
 /**
- * Mongoose `.lean()` results still contain ObjectId and Date instances, which
- * cannot cross the server/client boundary. These map documents into plain
- * JSON-safe shapes for rendering and for passing into Client Components.
+ * View models. Rows from Drizzle are already plain objects, so the job here is
+ * naming and formatting rather than serialisation.
  */
 
-export interface ClientDTO {
-  id: string
-  name: string
-  email: string
-  phone: string
-  gstin: string
-  notes: string
-  billingAddress: {
-    line1: string
-    line2: string
-    city: string
-    state: string
-    postalCode: string
-    country: string
-  }
-  createdAt: string
+export const INVOICE_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  posted: 'Posted',
+  voided: 'Voided',
 }
 
-export interface ItemDTO {
-  id: string
-  name: string
-  description: string
-  hsnSac: string
-  unit: string
-  price: number
-  taxRate: number
-  createdAt: string
+export const DOC_TYPE_LABELS: Record<string, string> = {
+  invoice: 'Invoice',
+  credit_note: 'Credit note',
+  payment: 'Payment',
 }
 
-type LeanDoc<T> = T & { _id: { toString(): string } }
-
-export function toClientDTO(doc: LeanDoc<IClient>): ClientDTO {
-  return {
-    id: doc._id.toString(),
-    name: doc.name,
-    email: doc.email ?? '',
-    phone: doc.phone ?? '',
-    gstin: doc.gstin ?? '',
-    notes: doc.notes ?? '',
-    billingAddress: {
-      line1: doc.billingAddress?.line1 ?? '',
-      line2: doc.billingAddress?.line2 ?? '',
-      city: doc.billingAddress?.city ?? '',
-      state: doc.billingAddress?.state ?? '',
-      postalCode: doc.billingAddress?.postalCode ?? '',
-      country: doc.billingAddress?.country ?? '',
-    },
-    createdAt: doc.createdAt?.toISOString() ?? '',
-  }
+export const STATUS_VARIANTS: Record<
+  string,
+  'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
+> = {
+  draft: 'secondary',
+  posted: 'success',
+  voided: 'destructive',
 }
 
-export function toItemDTO(doc: LeanDoc<IItem>): ItemDTO {
-  return {
-    id: doc._id.toString(),
-    name: doc.name,
-    description: doc.description ?? '',
-    hsnSac: doc.hsnSac ?? '',
-    unit: doc.unit ?? 'unit',
-    price: doc.price ?? 0,
-    taxRate: doc.taxRate ?? 0,
-    createdAt: doc.createdAt?.toISOString() ?? '',
-  }
+/** Derived settlement state — never stored, always computed from allocations. */
+export type SettlementState = 'unpaid' | 'part_paid' | 'paid' | 'overdue' | 'draft' | 'voided'
+
+export const SETTLEMENT_LABELS: Record<SettlementState, string> = {
+  draft: 'Draft',
+  unpaid: 'Unpaid',
+  part_paid: 'Partly paid',
+  paid: 'Paid',
+  overdue: 'Overdue',
+  voided: 'Voided',
 }
 
-export interface InvoiceLineDTO {
-  id: string
-  itemId: string | null
-  description: string
-  hsnSac: string
-  unit: string
-  quantity: number
-  unitPrice: number
-  taxRate: number
-  lineSubtotal: number
-  lineDiscount: number
-  lineTaxAmount: number
-  lineTotal: number
+export const SETTLEMENT_VARIANTS: Record<
+  SettlementState,
+  'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
+> = {
+  draft: 'secondary',
+  unpaid: 'outline',
+  part_paid: 'warning',
+  paid: 'success',
+  overdue: 'destructive',
+  voided: 'secondary',
 }
 
-export interface InvoiceDTO {
-  id: string
-  invoiceNumber: string
-  clientId: string
-  clientSnapshot: {
-    name: string
-    email: string
-    phone: string
-    gstin: string
-    address: string
-  }
-  issueDate: string
-  dueDate: string
-  status: InvoiceStatus
-  lineItems: InvoiceLineDTO[]
-  discountType: DiscountType
-  discountValue: number
-  subtotal: number
-  discountAmount: number
-  taxAmount: number
-  total: number
-  amountPaid: number
-  amountDue: number
-  notes: string
-  terms: string
-  createdAt: string
+export function settlementOf(input: {
+  status: string
+  totalMinor: number
+  allocatedMinor: number
+  dueDate: string | null
+  today?: string
+}): SettlementState {
+  if (input.status === 'draft') return 'draft'
+  if (input.status === 'voided') return 'voided'
+
+  const open = input.totalMinor - input.allocatedMinor
+  if (open <= 0) return 'paid'
+
+  const today = input.today ?? new Date().toISOString().slice(0, 10)
+  if (input.dueDate && input.dueDate < today) return 'overdue'
+
+  return input.allocatedMinor > 0 ? 'part_paid' : 'unpaid'
 }
 
-// Omit before re-declaring: an intersection would merge the two `client` and
-// `lineItems` types rather than replace them, which loses the `_id` fields.
-type LeanInvoice = Omit<IInvoice, 'client' | 'lineItems'> & {
-  _id: { toString(): string }
-  client: unknown
-  lineItems: Array<IInvoiceLineItem & { _id?: { toString(): string } }>
+/** ₹ for the browser. The PDF uses formatMoneyPlain — see the note there. */
+export function formatMoney(minor: number): string {
+  const negative = minor < 0
+  return `${negative ? '−' : ''}₹${formatMinorIN(Math.abs(minor))}`
 }
 
-/** `<input type="date">` needs "YYYY-MM-DD"; everything is stored as UTC. */
-export function toDateInputValue(date: Date | string | null | undefined): string {
-  if (!date) return ''
-  const parsed = date instanceof Date ? date : new Date(date)
-  if (Number.isNaN(parsed.getTime())) return ''
-  return parsed.toISOString().slice(0, 10)
+/**
+ * "INR 1,234.00" for the PDF.
+ *
+ * PDF base-14 fonts use WinAnsi encoding, which has no rupee sign (U+20B9) --
+ * it silently renders as a superscript one. Verified by extracting text from a
+ * generated PDF.
+ */
+export function formatMoneyPlain(minor: number): string {
+  const negative = minor < 0
+  return `${negative ? '-' : ''}INR ${formatMinorIN(Math.abs(minor))}`
 }
 
-/** `client` is an ObjectId when lean, or a populated document when populated. */
-function clientIdOf(client: unknown): string {
-  if (!client) return ''
-  if (typeof client === 'object' && '_id' in (client as Record<string, unknown>)) {
-    return String((client as { _id: unknown })._id)
-  }
-  return String(client)
+const dateFormatter = new Intl.DateTimeFormat('en-IN', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+export function formatDate(value: string | Date | null | undefined): string {
+  if (!value) return '—'
+  const date = typeof value === 'string' ? new Date(`${value.slice(0, 10)}T00:00:00Z`) : value
+  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.format(date)
 }
 
-export function toInvoiceDTO(doc: LeanInvoice): InvoiceDTO {
-  return {
-    id: doc._id.toString(),
-    invoiceNumber: doc.invoiceNumber,
-    clientId: clientIdOf(doc.client),
-    clientSnapshot: {
-      name: doc.clientSnapshot?.name ?? '',
-      email: doc.clientSnapshot?.email ?? '',
-      phone: doc.clientSnapshot?.phone ?? '',
-      gstin: doc.clientSnapshot?.gstin ?? '',
-      address: doc.clientSnapshot?.address ?? '',
-    },
-    issueDate: toDateInputValue(doc.issueDate),
-    dueDate: toDateInputValue(doc.dueDate),
-    status: doc.status,
-    lineItems: (doc.lineItems ?? []).map((line, index) => ({
-      id: line._id?.toString() ?? String(index),
-      itemId: line.item ? line.item.toString() : null,
-      description: line.description,
-      hsnSac: line.hsnSac ?? '',
-      unit: line.unit ?? 'unit',
-      quantity: line.quantity ?? 0,
-      unitPrice: line.unitPrice ?? 0,
-      taxRate: line.taxRate ?? 0,
-      lineSubtotal: line.lineSubtotal ?? 0,
-      lineDiscount: line.lineDiscount ?? 0,
-      lineTaxAmount: line.lineTaxAmount ?? 0,
-      lineTotal: line.lineTotal ?? 0,
-    })),
-    discountType: doc.discountType ?? 'fixed',
-    discountValue: doc.discountValue ?? 0,
-    subtotal: doc.subtotal ?? 0,
-    discountAmount: doc.discountAmount ?? 0,
-    taxAmount: doc.taxAmount ?? 0,
-    total: doc.total ?? 0,
-    amountPaid: doc.amountPaid ?? 0,
-    amountDue: doc.amountDue ?? 0,
-    notes: doc.notes ?? '',
-    terms: doc.terms ?? '',
-    createdAt: doc.createdAt?.toISOString() ?? '',
-  }
-}
-
-/** Single-line address for tables and, later, the invoice PDF. */
-export function formatAddress(address: ClientDTO['billingAddress']): string {
+export function formatAddress(address: {
+  line1?: string
+  line2?: string
+  city?: string
+  state?: string
+  postalCode?: string
+  country?: string
+} | null | undefined): string {
+  if (!address) return ''
   return [
     address.line1,
     address.line2,
@@ -198,64 +121,35 @@ export function formatAddress(address: ClientDTO['billingAddress']): string {
     .join(', ')
 }
 
-export const INVOICE_STATUS_LABELS: Record<string, string> = {
-  draft: 'Draft',
-  sent: 'Sent',
-  paid: 'Paid',
-  partially_paid: 'Partly paid',
-  overdue: 'Overdue',
-  cancelled: 'Cancelled',
+export function today(): string {
+  return new Date().toISOString().slice(0, 10)
 }
 
-export const INVOICE_STATUS_VARIANTS: Record<
-  string,
-  'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
-> = {
-  draft: 'secondary',
-  sent: 'outline',
-  paid: 'success',
-  partially_paid: 'warning',
-  overdue: 'destructive',
-  cancelled: 'secondary',
-}
+/** Indian state codes, for the place-of-supply picker that drives GST. */
+export const STATE_CODES: Array<{ code: string; name: string }> = [
+  { code: '01', name: 'Jammu & Kashmir' },
+  { code: '02', name: 'Himachal Pradesh' },
+  { code: '03', name: 'Punjab' },
+  { code: '04', name: 'Chandigarh' },
+  { code: '05', name: 'Uttarakhand' },
+  { code: '06', name: 'Haryana' },
+  { code: '07', name: 'Delhi' },
+  { code: '08', name: 'Rajasthan' },
+  { code: '09', name: 'Uttar Pradesh' },
+  { code: '10', name: 'Bihar' },
+  { code: '19', name: 'West Bengal' },
+  { code: '21', name: 'Odisha' },
+  { code: '23', name: 'Madhya Pradesh' },
+  { code: '24', name: 'Gujarat' },
+  { code: '27', name: 'Maharashtra' },
+  { code: '29', name: 'Karnataka' },
+  { code: '30', name: 'Goa' },
+  { code: '32', name: 'Kerala' },
+  { code: '33', name: 'Tamil Nadu' },
+  { code: '36', name: 'Telangana' },
+  { code: '37', name: 'Andhra Pradesh' },
+]
 
-const dateFormatter = new Intl.DateTimeFormat('en-IN', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-  timeZone: 'UTC',
-})
-
-/** Formats an ISO string for display; returns an em dash when absent. */
-export function formatDate(iso: string): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.format(date)
-}
-
-const currencyFormatter = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  minimumFractionDigits: 2,
-})
-
-export function formatCurrency(amount: number): string {
-  return currencyFormatter.format(amount)
-}
-
-const plainNumberFormatter = new Intl.NumberFormat('en-IN', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
-/**
- * Currency for the PDF, written as "INR 1,234.00".
- *
- * The rupee sign (U+20B9) is deliberately avoided here: PDF base-14 fonts use
- * WinAnsi encoding, which has no such glyph, so "₹" silently renders as "¹".
- * Verified by extracting text from a generated PDF. The web UI keeps the real
- * symbol -- browsers have fonts that cover it.
- */
-export function formatCurrencyPlain(amount: number): string {
-  return `INR ${plainNumberFormatter.format(amount)}`
+export function stateName(code: string): string {
+  return STATE_CODES.find((s) => s.code === code)?.name ?? code
 }

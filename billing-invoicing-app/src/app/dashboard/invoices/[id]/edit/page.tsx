@@ -1,66 +1,71 @@
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import { isValidObjectId } from 'mongoose'
+import { notFound, redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
-import { connectToDatabase } from '@/lib/mongodb'
-import { Client, type IClient } from '@/models/Client'
-import { Item, type IItem } from '@/models/Item'
-import { Invoice } from '@/models/Invoice'
-import { toClientDTO, toItemDTO, toInvoiceDTO } from '@/lib/dto'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { entities } from '@/db/schema'
+import { requireRole } from '@/lib/session'
+import { getDocument, listItems, listParties } from '@/lib/queries'
 import { InvoiceForm } from '@/app/dashboard/invoices/invoice-form'
 import { Button } from '@/components/ui/button'
 
-export const metadata = {
-  title: 'Edit invoice · Billing & Invoicing',
-}
+export const metadata = { title: 'Edit draft · Billing' }
+export const dynamic = 'force-dynamic'
 
-export default async function EditInvoicePage(
-  props: PageProps<'/dashboard/invoices/[id]/edit'>,
-) {
+export default async function EditInvoicePage(props: PageProps<'/dashboard/invoices/[id]/edit'>) {
+  const session = await requireRole('accountant')
   const { id } = await props.params
 
-  if (!isValidObjectId(id)) {
-    notFound()
-  }
+  const found = await getDocument(session.entityId, id).catch(() => null)
+  if (!found) notFound()
 
-  await connectToDatabase()
+  // Posted documents are immutable; there is nothing to edit.
+  if (found.doc.status !== 'draft') redirect(`/dashboard/invoices/${id}`)
 
-  const [invoiceDoc, clientDocs, itemDocs] = await Promise.all([
-    Invoice.findById(id).lean(),
-    Client.find({}).sort({ name: 1 }).lean<IClient[]>(),
-    Item.find({}).sort({ name: 1 }).lean<IItem[]>(),
+  const [parties, items, [org]] = await Promise.all([
+    listParties(session.entityId, ''),
+    listItems(session.entityId, ''),
+    db.select().from(entities).where(eq(entities.id, session.entityId)).limit(1),
   ])
-
-  if (!invoiceDoc) {
-    notFound()
-  }
-
-  const invoice = toInvoiceDTO(invoiceDoc as Parameters<typeof toInvoiceDTO>[0])
-  const clients = clientDocs.map((doc) =>
-    toClientDTO(doc as Parameters<typeof toClientDTO>[0]),
-  )
-  const items = itemDocs.map((doc) => toItemDTO(doc as Parameters<typeof toItemDTO>[0]))
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <Button
-          asChild
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground w-fit -ml-2"
-        >
-          <Link href={`/dashboard/invoices/${invoice.id}`}>
+        <Button asChild variant="ghost" size="sm" className="text-muted-foreground w-fit -ml-2">
+          <Link href={`/dashboard/invoices/${id}`}>
             <ArrowLeft />
-            Back to invoice
+            Back to document
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {invoice.invoiceNumber}
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Edit draft</h1>
       </div>
 
-      <InvoiceForm clients={clients} items={items} invoice={invoice} />
+      <InvoiceForm
+        parties={parties}
+        items={items}
+        sellerStateCode={org?.stateCode ?? ''}
+        docType={found.doc.docType as 'invoice' | 'credit_note'}
+        document={{
+          id: found.doc.id,
+          docType: found.doc.docType,
+          partyId: found.doc.partyId,
+          issueDate: found.doc.issueDate,
+          dueDate: found.doc.dueDate,
+          discountType: found.doc.discountType,
+          discountValue: found.doc.discountValue,
+          notes: found.doc.notes,
+          terms: found.doc.terms,
+          lines: found.lines.map((line) => ({
+            itemId: line.itemId,
+            description: line.description,
+            hsnSac: line.hsnSac,
+            unit: line.unit,
+            quantity: line.quantity,
+            unitPriceMinor: line.unitPriceMinor,
+            taxRatePercent: line.taxRatePercent,
+          })),
+        }}
+      />
     </div>
   )
 }

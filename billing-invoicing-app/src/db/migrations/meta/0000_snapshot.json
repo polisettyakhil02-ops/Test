@@ -1,5 +1,5 @@
 {
-  "id": "a9e6959c-fbe6-434c-924a-902dcefc844a",
+  "id": "f7c477ce-7624-4954-98d9-6181a326be54",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1172,6 +1172,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "default_tax_rate_percent": {
+          "name": "default_tax_rate_percent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
         },
         "tax_code_id": {
           "name": "tax_code_id",

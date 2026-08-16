@@ -2,286 +2,350 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { isValidObjectId } from 'mongoose'
-import { auth } from '@/auth'
-import { connectToDatabase } from '@/lib/mongodb'
-import { Client, type IClient } from '@/models/Client'
-import { Invoice } from '@/models/Invoice'
-import { invoiceSchema, fieldErrors, type InvoiceInput } from '@/lib/validation'
-import { derivePaymentStatus } from '@/lib/invoice-math'
+import { and, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { documents, entities, parties } from '@/db/schema'
+import { requireRole } from '@/lib/session'
+import { invoiceSchema, paymentSchema, fieldErrors, type InvoiceInput } from '@/lib/validation'
+import { parseMinor } from '@/domain/money'
+import { priceDocument, resolveSupplyKind } from '@/domain/pricing'
+import {
+  PostingError,
+  openBalanceMinor,
+  postInvoice,
+  postPayment,
+  replaceDocumentLines,
+  reverseDocument,
+} from '@/domain/posting'
 import { formatAddress } from '@/lib/dto'
 import type { FormState, DeleteResult } from '@/lib/form-state'
 
-/** Server Actions are public endpoints; the protected layout does not cover them. */
-async function requireSession() {
-  const session = await auth()
-  if (!session?.user) {
-    redirect('/login')
-  }
-}
-
-function parseForm(formData: FormData) {
-  // Line items are edited as dynamic client state, so they arrive as one JSON
-  // blob rather than indexed form fields.
-  let lineItems: unknown = []
-
+function parseInvoiceForm(formData: FormData) {
+  let lines: unknown = []
   try {
-    lineItems = JSON.parse(String(formData.get('lineItems') || '[]'))
+    lines = JSON.parse(String(formData.get('lines') || '[]'))
   } catch {
-    lineItems = []
+    lines = []
   }
 
   return invoiceSchema.safeParse({
-    client: formData.get('client'),
+    partyId: formData.get('partyId'),
     issueDate: formData.get('issueDate'),
     dueDate: formData.get('dueDate'),
-    status: formData.get('status'),
-    lineItems,
+    lines,
     discountType: formData.get('discountType'),
     discountValue: formData.get('discountValue'),
-    amountPaid: formData.get('amountPaid'),
     notes: formData.get('notes'),
     terms: formData.get('terms'),
   })
 }
 
-/**
- * Builds the document payload, snapshotting the client's details as they are
- * right now. The snapshot is what the invoice and its PDF display, so editing
- * or deleting the client later never rewrites an invoice already issued.
- */
-async function buildPayload(parsed: InvoiceInput) {
-  const client = await Client.findById(parsed.client).lean<IClient>()
+/** Prices a draft and writes it, header and lines together. */
+async function saveDraft(
+  session: { entityId: string; userId: string; email: string },
+  input: InvoiceInput,
+  options: { documentId?: string; docType: 'invoice' | 'credit_note'; correctsDocumentId?: string },
+) {
+  const [party] = await db
+    .select()
+    .from(parties)
+    .where(and(eq(parties.entityId, session.entityId), eq(parties.id, input.partyId)))
+    .limit(1)
 
-  if (!client) {
-    return null
-  }
+  if (!party) throw new Error('That client no longer exists.')
 
-  const issueDate = new Date(`${parsed.issueDate}T00:00:00.000Z`)
-  const dueDate = parsed.dueDate ? new Date(`${parsed.dueDate}T00:00:00.000Z`) : null
+  const [org] = await db
+    .select()
+    .from(entities)
+    .where(eq(entities.id, session.entityId))
+    .limit(1)
 
-  const lineItems = parsed.lineItems.map((line) => ({
-    item: line.item ?? null,
-    description: line.description,
-    hsnSac: line.hsnSac,
-    unit: line.unit,
-    quantity: line.quantity,
-    unitPrice: line.unitPrice,
-    taxRate: line.taxRate,
-    // Recomputed by the model's pre-validate hook; never trust the client.
-    lineSubtotal: 0,
-    lineDiscount: 0,
-    lineTaxAmount: 0,
-    lineTotal: 0,
-  }))
+  const supplyKind = resolveSupplyKind(org?.stateCode ?? '', party.stateCode)
 
-  return {
-    client: parsed.client,
-    clientSnapshot: {
-      name: client.name,
-      email: client.email ?? '',
-      phone: client.phone ?? '',
-      gstin: client.gstin ?? '',
-      address: formatAddress({
-        line1: client.billingAddress?.line1 ?? '',
-        line2: client.billingAddress?.line2 ?? '',
-        city: client.billingAddress?.city ?? '',
-        state: client.billingAddress?.state ?? '',
-        postalCode: client.billingAddress?.postalCode ?? '',
-        country: client.billingAddress?.country ?? '',
-      }),
+  const priced = priceDocument({
+    lines: input.lines.map((line) => ({
+      description: line.description,
+      quantity: line.quantity,
+      unitPriceMinor: parseMinor(line.unitPrice),
+      taxRatePercent: line.taxRatePercent,
+    })),
+    discountType: input.discountType,
+    discountValue: input.discountValue,
+    supplyKind,
+  })
+
+  const header = {
+    entityId: session.entityId,
+    docType: options.docType,
+    partyId: party.id,
+    partySnapshot: {
+      name: party.name,
+      email: party.email,
+      phone: party.phone,
+      gstin: party.gstin,
+      stateCode: party.stateCode,
+      address: formatAddress(party.billingAddress),
     },
-    issueDate,
-    dueDate,
-    lineItems,
-    discountType: parsed.discountType,
-    discountValue: parsed.discountValue,
-    amountPaid: parsed.amountPaid,
-    notes: parsed.notes,
-    terms: parsed.terms,
-    status: parsed.status,
+    issueDate: input.issueDate,
+    dueDate: input.dueDate || null,
+    subtotalMinor: priced.subtotalMinor,
+    discountMinor: priced.discountMinor,
+    taxMinor: priced.taxMinor,
+    totalMinor: priced.totalMinor,
+    discountType: input.discountType,
+    discountValue: input.discountValue,
+    supplyKind,
+    placeOfSupply: party.stateCode,
+    notes: input.notes,
+    terms: input.terms,
+    correctsDocumentId: options.correctsDocumentId ?? null,
+    updatedAt: new Date(),
   }
+
+  return db.transaction(async (tx) => {
+    let documentId = options.documentId
+
+    if (documentId) {
+      await tx.update(documents).set(header).where(eq(documents.id, documentId))
+    } else {
+      const [created] = await tx.insert(documents).values(header).returning()
+      documentId = created.id
+    }
+
+    await replaceDocumentLines(
+      tx,
+      documentId,
+      input.lines.map((line, index) => ({
+        lineNo: index + 1,
+        itemId: line.itemId ?? null,
+        description: line.description,
+        hsnSac: line.hsnSac,
+        unit: line.unit || 'unit',
+        quantity: line.quantity,
+        unitPriceMinor: parseMinor(line.unitPrice),
+        taxRatePercent: line.taxRatePercent,
+        ...priced.lines[index],
+      })),
+    )
+
+    return documentId
+  })
 }
 
-export async function createInvoice(
-  _prevState: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  await requireSession()
-
-  const parsed = parseForm(formData)
+export async function createInvoice(_prev: FormState, formData: FormData): Promise<FormState> {
+  const session = await requireRole('accountant')
+  const parsed = parseInvoiceForm(formData)
 
   if (!parsed.success) {
-    return {
-      error: 'Please fix the highlighted fields.',
-      fieldErrors: fieldErrors(parsed.error),
-    }
+    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
   }
 
+  const docType = String(formData.get('docType') || 'invoice') as 'invoice' | 'credit_note'
+  const corrects = String(formData.get('correctsDocumentId') || '') || undefined
+
   let id: string
-
   try {
-    await connectToDatabase()
-
-    const payload = await buildPayload(parsed.data)
-
-    if (!payload) {
-      return { error: 'That client no longer exists.', fieldErrors: {} }
-    }
-
-    const invoice = new Invoice(payload)
-    // Totals are computed by the pre-validate hook, so the status can only be
-    // reconciled against them after validation has run.
-    await invoice.validate()
-    invoice.status = derivePaymentStatus(
-      parsed.data.status,
-      invoice.total,
-      invoice.amountPaid,
-      invoice.dueDate,
-    )
-    await invoice.save()
-
-    id = invoice._id.toString()
+    id = await saveDraft(session, parsed.data, { docType, correctsDocumentId: corrects })
   } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Could not save the invoice.',
-      fieldErrors: {},
-    }
+    return { error: error instanceof Error ? error.message : 'Could not save.', fieldErrors: {} }
   }
 
   revalidatePath('/dashboard/invoices')
-  revalidatePath('/dashboard')
   redirect(`/dashboard/invoices/${id}`)
 }
 
 export async function updateInvoice(
-  id: string,
-  _prevState: FormState,
+  documentId: string,
+  _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  await requireSession()
-
-  if (!isValidObjectId(id)) {
-    return { error: 'That invoice no longer exists.', fieldErrors: {} }
-  }
-
-  const parsed = parseForm(formData)
+  const session = await requireRole('accountant')
+  const parsed = parseInvoiceForm(formData)
 
   if (!parsed.success) {
-    return {
-      error: 'Please fix the highlighted fields.',
-      fieldErrors: fieldErrors(parsed.error),
-    }
+    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
   }
 
-  try {
-    await connectToDatabase()
+  const [existing] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.entityId, session.entityId), eq(documents.id, documentId)))
+    .limit(1)
 
-    const invoice = await Invoice.findById(id)
-
-    if (!invoice) {
-      return { error: 'That invoice no longer exists.', fieldErrors: {} }
-    }
-
-    const payload = await buildPayload(parsed.data)
-
-    if (!payload) {
-      return { error: 'That client no longer exists.', fieldErrors: {} }
-    }
-
-    // invoiceNumber is deliberately not in the payload: it is assigned once and
-    // must never change, or an already-sent invoice would be renumbered.
-    invoice.set(payload)
-    await invoice.validate()
-    invoice.status = derivePaymentStatus(
-      parsed.data.status,
-      invoice.total,
-      invoice.amountPaid,
-      invoice.dueDate,
-    )
-    await invoice.save()
-  } catch (error) {
+  if (!existing) return { error: 'That document no longer exists.', fieldErrors: {} }
+  if (existing.status !== 'draft') {
     return {
-      error: error instanceof Error ? error.message : 'Could not save the invoice.',
+      error: 'This document is posted and cannot be edited. Raise a credit note instead.',
       fieldErrors: {},
     }
   }
 
+  try {
+    await saveDraft(session, parsed.data, {
+      documentId,
+      docType: existing.docType as 'invoice' | 'credit_note',
+      correctsDocumentId: existing.correctsDocumentId ?? undefined,
+    })
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Could not save.', fieldErrors: {} }
+  }
+
   revalidatePath('/dashboard/invoices')
-  revalidatePath(`/dashboard/invoices/${id}`)
-  revalidatePath('/dashboard')
-  redirect(`/dashboard/invoices/${id}`)
+  revalidatePath(`/dashboard/invoices/${documentId}`)
+  redirect(`/dashboard/invoices/${documentId}`)
 }
 
-export async function deleteInvoice(id: string): Promise<DeleteResult> {
-  await requireSession()
+/** The one-way door: draft becomes posted, and the ledger entry is written. */
+export async function postDocument(documentId: string): Promise<DeleteResult> {
+  const session = await requireRole('accountant')
 
-  if (!isValidObjectId(id)) {
-    return { ok: false, message: 'That invoice no longer exists.' }
+  try {
+    const result = await db.transaction(async (tx) =>
+      postInvoice(tx, documentId, { id: session.userId, email: session.email }),
+    )
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/invoices')
+    revalidatePath(`/dashboard/invoices/${documentId}`)
+    return { ok: true, message: `Posted as ${result.number}.` }
+  } catch (error) {
+    if (error instanceof PostingError) return { ok: false, message: error.message }
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not post.' }
+  }
+}
+
+export async function voidDocument(documentId: string): Promise<DeleteResult> {
+  const session = await requireRole('admin')
+
+  try {
+    await db.transaction(async (tx) =>
+      reverseDocument(tx, documentId, { id: session.userId, email: session.email }),
+    )
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/invoices')
+    revalidatePath(`/dashboard/invoices/${documentId}`)
+    return { ok: true, message: 'Voided with a reversing entry.' }
+  } catch (error) {
+    if (error instanceof PostingError) return { ok: false, message: error.message }
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not void.' }
+  }
+}
+
+export async function deleteDraft(documentId: string): Promise<DeleteResult> {
+  const session = await requireRole('accountant')
+
+  try {
+    // The database refuses this for anything not a draft, so there is no way to
+    // delete a posted document even by mistake.
+    await db
+      .delete(documents)
+      .where(and(eq(documents.entityId, session.entityId), eq(documents.id, documentId)))
+  } catch (error) {
+    const cause = (error as { cause?: { message?: string } })?.cause
+    return {
+      ok: false,
+      message: cause?.message ?? (error instanceof Error ? error.message : 'Could not delete.'),
+    }
+  }
+
+  revalidatePath('/dashboard/invoices')
+  return { ok: true, message: 'Draft deleted.' }
+}
+
+/** Records a receipt and settles it against the chosen invoices. */
+export async function recordPayment(_prev: FormState, formData: FormData): Promise<FormState> {
+  const session = await requireRole('accountant')
+
+  let allocations: unknown = []
+  try {
+    allocations = JSON.parse(String(formData.get('allocations') || '[]'))
+  } catch {
+    allocations = []
+  }
+
+  const parsed = paymentSchema.safeParse({
+    partyId: formData.get('partyId'),
+    issueDate: formData.get('issueDate'),
+    amount: formData.get('amount'),
+    reference: formData.get('reference'),
+    allocations,
+  })
+
+  if (!parsed.success) {
+    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
+  }
+
+  const amountMinor = parseMinor(parsed.data.amount)
+  const targets = parsed.data.allocations
+    .map((a) => ({ documentId: a.documentId, amountMinor: parseMinor(a.amount) }))
+    .filter((a) => a.amountMinor > 0)
+
+  const allocatedTotal = targets.reduce((sum, t) => sum + t.amountMinor, 0)
+
+  if (allocatedTotal > amountMinor) {
+    return {
+      error: 'You have allocated more than the payment amount.',
+      fieldErrors: { amount: 'Allocations exceed this payment' },
+    }
   }
 
   try {
-    await connectToDatabase()
-    const deleted = await Invoice.findByIdAndDelete(id)
+    const [party] = await db
+      .select()
+      .from(parties)
+      .where(and(eq(parties.entityId, session.entityId), eq(parties.id, parsed.data.partyId)))
+      .limit(1)
 
-    if (!deleted) {
-      return { ok: false, message: 'That invoice no longer exists.' }
+    if (!party) return { error: 'That client no longer exists.', fieldErrors: {} }
+
+    // Each allocation is capped at what the invoice still owes, so a stale form
+    // cannot over-settle a document someone else just paid.
+    for (const target of targets) {
+      const open = await openBalanceMinor(db, target.documentId)
+      if (target.amountMinor > open) {
+        return {
+          error: 'One of those invoices has already been settled. Reload and try again.',
+          fieldErrors: {},
+        }
+      }
     }
+
+    await db.transaction(async (tx) => {
+      const [payment] = await tx
+        .insert(documents)
+        .values({
+          entityId: session.entityId,
+          docType: 'payment',
+          partyId: party.id,
+          partySnapshot: {
+            name: party.name,
+            email: party.email,
+            phone: party.phone,
+            gstin: party.gstin,
+            stateCode: party.stateCode,
+            address: formatAddress(party.billingAddress),
+          },
+          issueDate: parsed.data.issueDate,
+          totalMinor: amountMinor,
+          subtotalMinor: amountMinor,
+          notes: parsed.data.reference,
+        })
+        .returning()
+
+      await postPayment(tx, payment.id, targets, {
+        id: session.userId,
+        email: session.email,
+      })
+    })
   } catch (error) {
+    if (error instanceof PostingError) return { error: error.message, fieldErrors: {} }
+    const cause = (error as { cause?: { message?: string } })?.cause
     return {
-      ok: false,
-      message: error instanceof Error ? error.message : 'Could not delete the invoice.',
+      error: cause?.message ?? (error instanceof Error ? error.message : 'Could not record.'),
+      fieldErrors: {},
     }
   }
 
-  revalidatePath('/dashboard/invoices')
   revalidatePath('/dashboard')
-  return { ok: true, message: 'Invoice deleted.' }
-}
-
-/** Quick status change from the invoice detail page. */
-export async function setInvoiceStatus(
-  id: string,
-  status: string,
-): Promise<DeleteResult> {
-  await requireSession()
-
-  if (!isValidObjectId(id)) {
-    return { ok: false, message: 'That invoice no longer exists.' }
-  }
-
-  const allowed = ['draft', 'sent', 'paid', 'partially_paid', 'overdue', 'cancelled']
-
-  if (!allowed.includes(status)) {
-    return { ok: false, message: 'Unknown status.' }
-  }
-
-  try {
-    await connectToDatabase()
-
-    const invoice = await Invoice.findById(id)
-
-    if (!invoice) {
-      return { ok: false, message: 'That invoice no longer exists.' }
-    }
-
-    // Marking an invoice paid should settle the balance too, otherwise the
-    // dashboard would report it as paid while still counting it as outstanding.
-    if (status === 'paid') {
-      invoice.amountPaid = invoice.total
-    }
-
-    invoice.status = status as typeof invoice.status
-    await invoice.save()
-  } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : 'Could not update the invoice.',
-    }
-  }
-
   revalidatePath('/dashboard/invoices')
-  revalidatePath(`/dashboard/invoices/${id}`)
-  revalidatePath('/dashboard')
-  return { ok: true, message: 'Invoice updated.' }
+  redirect('/dashboard/invoices?docType=payment')
 }
