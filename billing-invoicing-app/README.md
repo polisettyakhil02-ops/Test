@@ -46,6 +46,7 @@ There is no public sign-up.
 | `npm run build` | Production build |
 | `npm run setup` | Migrations, seed data and the admin user |
 | `npm run entity` | Show or set your own GSTIN, address and bank details |
+| `npm run demo` | Fill an empty database with a realistic dataset to look around |
 | `npm run outbox` | Deliver queued events (`-- --once` for cron) |
 | `npm test` | Domain and ledger tests against real PostgreSQL |
 | `npm run dev:db` | A local PostgreSQL on :5432, backed by PGlite (no install needed) |

@@ -10,6 +10,7 @@
     "test": "tsx --test test/*.test.ts",
     "setup": "tsx scripts/setup.ts",
     "entity": "tsx scripts/entity.ts",
+    "demo": "tsx scripts/demo-seed.ts",
     "outbox": "tsx scripts/outbox-worker.ts",
     "db:generate": "drizzle-kit generate",
     "dev:db": "tsx scripts/dev-db.mts"
