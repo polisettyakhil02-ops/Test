@@ -34,7 +34,11 @@ export default auth((req) => {
 })
 
 export const config = {
-  // Skip Next internals, the auth API routes, and static assets. Without this
-  // the redirect below would also fire for CSS and JS requests.
-  matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  // Skip Next internals, the auth API routes, the health probe and static
+  // assets. Without this the redirect below would also fire for CSS and JS
+  // requests; excluding the probe keeps a load balancer's polling off the auth
+  // path entirely.
+  matcher: [
+    '/((?!api/auth|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+  ],
 }

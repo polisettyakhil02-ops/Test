@@ -1,0 +1,31 @@
+# Everything here either does not belong in an image or would invalidate the
+# build cache on every change.
+
+node_modules
+.next
+dist-scripts
+.git
+.github
+
+# The local PGlite database and any copy set aside after a crash.
+.devdb*
+
+# Secrets. The image must never carry them -- they arrive as environment
+# variables at run time.
+.env
+.env.*
+!.env.example
+
+# Test and tooling output
+coverage
+*.tsbuildinfo
+next-env.d.ts
+test/e2e-*.js
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Dockerfile
+.dockerignore
+docker-compose.yml

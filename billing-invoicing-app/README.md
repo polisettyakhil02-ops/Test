@@ -47,10 +47,12 @@ There is no public sign-up.
 | `npm run setup` | Migrations, seed data and the admin user |
 | `npm run entity` | Show or set your own GSTIN, address and bank details |
 | `npm run demo` | Fill an empty database with a realistic dataset to look around |
+| `npm run migrate` | Apply pending migrations and the ledger guards |
 | `npm run outbox` | Deliver queued events (`-- --once` for cron) |
 | `npm test` | Domain and ledger tests against real PostgreSQL |
 | `npm run dev:db` | A local PostgreSQL on :5432, backed by PGlite (no install needed) |
 | `npm run db:generate` | Regenerate migrations after a schema change |
+| `npm run build:scripts` | Bundle the deploy scripts for the container image |
 | `npm run lint` | ESLint |
 
 ## The ledger is the source of truth
@@ -238,6 +240,27 @@ protect the action itself. Voiding a posted document is admin-only.
 In Next.js 16 the `middleware` convention was **renamed to `proxy`**. This file
 is the direct equivalent. Tutorials for Next 15 and earlier will tell you to
 create `middleware.ts`; that name is deprecated here.
+
+## Deploying it
+
+There is no separate front end and back end. This is one Next.js application —
+pages, the Server Actions that write to the database, and the PDF and CSV route
+handlers all run in the same process — so you deploy one thing, with PostgreSQL
+alongside it.
+
+```bash
+cp .env.example .env      # POSTGRES_PASSWORD, AUTH_SECRET, AUTH_URL
+docker compose up -d --build
+docker compose run --rm app node dist-scripts/setup.cjs --email you@yourco.com --password "..."
+```
+
+That brings up PostgreSQL and the app on `127.0.0.1:3000`, runs migrations on
+every boot, and leaves TLS to a reverse proxy in front. `GET /api/health`
+returns 200 only when the app can actually reach the database.
+
+**[DEPLOY.md](DEPLOY.md)** has the whole thing: Caddy and nginx configs, TLS,
+backups, updates, running without Docker, managed platforms, and a checklist to
+work through before you invoice a real customer.
 
 ## Not built yet
 

@@ -44,3 +44,6 @@ next-env.d.ts
 # matters: `.devdb/` alone does not cover `.devdb.corrupt-1234/`, and 40MB of
 # database binaries are one `git add -A` away from a commit.
 .devdb*/
+
+# Bundled deploy scripts, produced by `npm run build:scripts`.
+dist-scripts/
