@@ -11,6 +11,7 @@
     "setup": "tsx scripts/setup.ts",
     "entity": "tsx scripts/entity.ts",
     "demo": "tsx scripts/demo-seed.ts",
+    "export": "tsx scripts/export-demo.ts",
     "outbox": "tsx scripts/outbox-worker.ts",
     "db:generate": "drizzle-kit generate",
     "dev:db": "tsx scripts/dev-db.mts"

@@ -89,9 +89,27 @@ async function main() {
 
   const itemIds: Record<string, string> = {}
   for (const i of ITEMS) {
-    const [row] = await db.insert(items).values({ entityId: org.id, ...i }).returning()
+    // Mapped column by column rather than spread. `...i` compiled cleanly --
+    // excess property checks do not apply through a spread -- and silently
+    // inserted nothing for the price and rate, leaving every item at zero.
+    const [row] = await db
+      .insert(items)
+      .values({
+        entityId: org.id,
+        name: i.name,
+        description: i.description,
+        hsnSac: i.hsnSac,
+        unit: i.unit,
+        unitPriceMinor: parseMinor(i.unitPrice),
+        defaultTaxRatePercent: i.taxRatePercent,
+      })
+      .returning()
     itemIds[i.name] = row.id
   }
+
+  const zeroPriced = await db.select().from(items).where(eq(items.unitPriceMinor, 0))
+  if (zeroPriced.length > 0) throw new Error(`${zeroPriced.length} items seeded with no price`)
+
   console.log(`items: ${ITEMS.length}`)
 
   async function draft(opts: {
