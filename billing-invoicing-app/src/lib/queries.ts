@@ -3,6 +3,7 @@ import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/db'
 import { documentLineTaxes, documentLines, documents, items, parties } from '@/db/schema'
 import { PAGE_SIZE, paged, pageOffset, type Page } from '@/lib/paging'
+import { isRecordId } from '@/lib/record-id'
 
 export { PAGE_SIZE, pageOffset, type Page } from '@/lib/paging'
 
@@ -55,6 +56,8 @@ export async function listParties(
 }
 
 export async function getParty(entityId: string, id: string) {
+  if (!isRecordId(id)) return null
+
   const [row] = await db
     .select()
     .from(parties)
@@ -122,6 +125,8 @@ export async function allParties(entityId: string) {
 }
 
 export async function getItem(entityId: string, id: string) {
+  if (!isRecordId(id)) return null
+
   const [row] = await db
     .select()
     .from(items)
@@ -318,6 +323,8 @@ export async function listReturnDocuments(
 }
 
 export async function getDocument(entityId: string, id: string) {
+  if (!isRecordId(id)) return null
+
   const [doc] = await db
     .select()
     .from(documents)
@@ -359,6 +366,8 @@ export async function getDocument(entityId: string, id: string) {
 
 /** Open invoices for a party, for the payment allocation screen. */
 export async function openInvoicesFor(entityId: string, partyId: string) {
+  if (!isRecordId(partyId)) return []
+
   const rows = await db.execute(sql`
     SELECT d.id,
            d.doc_number,

@@ -12,7 +12,7 @@ export default async function EditClientPage(props: PageProps<'/dashboard/client
   const session = await requireRole('accountant')
   const { id } = await props.params
 
-  const party = await getParty(session.entityId, id).catch(() => null)
+  const party = await getParty(session.entityId, id)
   if (!party) notFound()
 
   return (

@@ -19,7 +19,7 @@ export async function GET(
   const session = await requireSession()
   const { id } = await context.params
 
-  const found = await getDocument(session.entityId, id).catch(() => null)
+  const found = await getDocument(session.entityId, id)
   if (!found) return new Response('Not found', { status: 404 })
 
   const [org] = await db

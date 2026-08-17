@@ -12,7 +12,7 @@ export default async function EditItemPage(props: PageProps<'/dashboard/items/[i
   const session = await requireRole('accountant')
   const { id } = await props.params
 
-  const item = await getItem(session.entityId, id).catch(() => null)
+  const item = await getItem(session.entityId, id)
   if (!item) notFound()
 
   return (

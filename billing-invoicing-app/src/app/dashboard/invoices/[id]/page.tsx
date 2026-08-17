@@ -33,7 +33,7 @@ export default async function DocumentPage(props: PageProps<'/dashboard/invoices
   const session = await requireSession()
   const { id } = await props.params
 
-  const found = await getDocument(session.entityId, id).catch(() => null)
+  const found = await getDocument(session.entityId, id)
   if (!found) notFound()
 
   const { doc, lines, taxes, allocatedMinor } = found

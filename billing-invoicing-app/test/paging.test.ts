@@ -2,6 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { pageNumbers } from '@/components/pagination'
 import { paged, pageOffset } from '@/lib/paging'
+import { isRecordId } from '@/lib/record-id'
 import { endOfMonth, oneYearBefore, pageParam, startOfMonth } from '@/lib/dto'
 
 /**
@@ -82,6 +83,30 @@ describe('the ?page= parameter', () => {
 
   test('a fractional page is floored, not rejected', () => {
     assert.equal(pageParam('2.7'), 2)
+  })
+})
+
+describe('record ids from the URL', () => {
+  test('a real uuid is accepted, in either case', () => {
+    assert.equal(isRecordId('1480f47d-427e-42b4-8fbb-3a7fbf33b9d5'), true)
+    assert.equal(isRecordId('1480F47D-427E-42B4-8FBB-3A7FBF33B9D5'), true)
+  })
+
+  test('the shapes a typo’d or hand-edited URL actually produces are rejected', () => {
+    // Each of these reached PostgreSQL before the guard existed and came back
+    // as a 500 rather than a 404.
+    assert.equal(isRecordId('not-a-uuid'), false)
+    assert.equal(isRecordId('undefined'), false)
+    assert.equal(isRecordId(''), false)
+    assert.equal(isRecordId('1480f47d-427e-42b4-8fbb'), false)
+    assert.equal(isRecordId('1480f47d427e42b48fbb3a7fbf33b9d5'), false)
+    assert.equal(isRecordId('1480f47d-427e-42b4-8fbb-3a7fbf33b9d5x'), false)
+    assert.equal(isRecordId('zzzzzzzz-427e-42b4-8fbb-3a7fbf33b9d5'), false)
+  })
+
+  test('it does not match a uuid buried in a longer string', () => {
+    assert.equal(isRecordId(' 1480f47d-427e-42b4-8fbb-3a7fbf33b9d5'), false)
+    assert.equal(isRecordId("1480f47d-427e-42b4-8fbb-3a7fbf33b9d5' OR 1=1--"), false)
   })
 })
 

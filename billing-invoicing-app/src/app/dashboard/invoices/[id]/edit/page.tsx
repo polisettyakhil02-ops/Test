@@ -16,7 +16,7 @@ export default async function EditInvoicePage(props: PageProps<'/dashboard/invoi
   const session = await requireRole('accountant')
   const { id } = await props.params
 
-  const found = await getDocument(session.entityId, id).catch(() => null)
+  const found = await getDocument(session.entityId, id)
   if (!found) notFound()
 
   // Posted documents are immutable; there is nothing to edit.

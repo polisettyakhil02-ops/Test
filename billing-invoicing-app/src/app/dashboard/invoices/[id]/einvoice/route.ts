@@ -18,7 +18,7 @@ export async function GET(
   const session = await requireRole('accountant')
   const { id } = await context.params
 
-  const found = await einvoiceInputFor(session.entityId, id).catch(() => null)
+  const found = await einvoiceInputFor(session.entityId, id)
   if (!found) return new Response('Not found', { status: 404 })
 
   const blockers = einvoiceBlockers(found.input)
