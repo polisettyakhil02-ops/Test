@@ -90,7 +90,7 @@ export default async function NewInvoicePage(props: PageProps<'/dashboard/invoic
           sellerStateCode={org?.stateCode ?? ''}
           docType={docType}
           correctsDocumentId={corrects}
-          document={seed as never}
+          document={seed}
         />
       )}
     </div>

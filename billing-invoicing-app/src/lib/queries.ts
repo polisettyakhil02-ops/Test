@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { documentLines, documents, items, parties } from '@/db/schema'
+import { documentLineTaxes, documentLines, documents, items, parties } from '@/db/schema'
 
 /**
  * Read-side queries shared by the pages.
@@ -138,6 +138,21 @@ export async function getDocument(entityId: string, id: string) {
     .where(eq(documentLines.documentId, id))
     .orderBy(asc(documentLines.lineNo))
 
+  // The tax components stored at posting time -- CGST/SGST or IGST. Reading
+  // them back is what lets the document show the same breakdown it was issued
+  // with, rather than recomputing from a rate that may since have changed.
+  const taxes = lines.length
+    ? await db
+        .select()
+        .from(documentLineTaxes)
+        .where(
+          inArray(
+            documentLineTaxes.documentLineId,
+            lines.map((line) => line.id),
+          ),
+        )
+    : []
+
   const [allocated] = await db
     .select({
       total: sql<string>`COALESCE(SUM(amount_minor), 0)`,
@@ -145,7 +160,7 @@ export async function getDocument(entityId: string, id: string) {
     .from(sql`allocations`)
     .where(sql`to_document_id = ${id}`)
 
-  return { doc, lines, allocatedMinor: Number(allocated?.total ?? 0) }
+  return { doc, lines, taxes, allocatedMinor: Number(allocated?.total ?? 0) }
 }
 
 /** Open invoices for a party, for the payment allocation screen. */

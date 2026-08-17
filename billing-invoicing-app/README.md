@@ -37,6 +37,7 @@ There is no public sign-up.
 | `npm run build` | Production build |
 | `npm run setup` | Migrations, seed data and the admin user |
 | `npm test` | Ledger integration tests against real PostgreSQL |
+| `npm run dev:db` | A local PostgreSQL on :5432, backed by PGlite (no install needed) |
 | `npm run db:generate` | Regenerate migrations after a schema change |
 | `npm run lint` | ESLint |
 
@@ -109,6 +110,25 @@ all:
 - a rolled-back posting does not consume an invoice number
 - eight concurrent postings never issue the same number
 - a posting refused by a closed period writes nothing whatsoever
+
+### Running the app without installing PostgreSQL
+
+```bash
+npm run dev:db     # PostgreSQL on 127.0.0.1:5432, data in .devdb/
+npm run setup -- --email you@company.com --password "your-password"
+npm run dev
+```
+
+`dev:db` serves PGlite over the real Postgres wire protocol, so the app
+connects exactly as it would to a production instance. One constraint: PGlite
+is a single WASM instance and serves one connection at a time, so set
+`DATABASE_POOL_MAX=1` when pointing at it. A real PostgreSQL has no such
+limit — that is a property of the harness, not the app.
+
+`test/e2e-flow.js` drives the whole business flow through a browser against
+that server: sign in, create a client and item, draft an invoice from the item
+master, post it, check the trial balance balances, take a partial payment,
+raise and post a credit note, and download the PDF.
 
 ## Reports
 

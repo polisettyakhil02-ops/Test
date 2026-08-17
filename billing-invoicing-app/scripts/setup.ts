@@ -7,11 +7,15 @@
  * Safe to re-run: it will not duplicate the entity, and re-running with an
  * existing email resets that user's password.
  */
-import 'dotenv/config'
+import { config as loadEnv } from 'dotenv'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import postgres from 'postgres'
 import bcrypt from 'bcryptjs'
+
+// Next.js reads .env.local, so this script must too -- dotenv's default only
+// looks at .env, which would leave DATABASE_URL undefined for everyone.
+loadEnv({ path: ['.env.local', '.env'], quiet: true })
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag)

@@ -33,6 +33,7 @@ export interface FormItem {
 }
 
 export interface FormDocument {
+  /** Empty when this is a prefill (e.g. a credit note seeded from an invoice). */
   id: string
   docType: string
   partyId: string
@@ -132,7 +133,10 @@ export function InvoiceForm({
   docType?: 'invoice' | 'credit_note'
   correctsDocumentId?: string
 }) {
-  const isEdit = Boolean(document)
+  // Edit mode is decided by the presence of a real id, not of the object: a
+  // credit note is seeded with a copy of the invoice it corrects but has no id
+  // of its own yet, and must still create rather than update.
+  const isEdit = Boolean(document?.id)
   const action = isEdit
     ? updateInvoice.bind(null, document!.id)
     : (createInvoice as (s: FormState, f: FormData) => Promise<FormState>)

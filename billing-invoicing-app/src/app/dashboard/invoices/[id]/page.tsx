@@ -32,7 +32,7 @@ export default async function DocumentPage(props: PageProps<'/dashboard/invoices
   const found = await getDocument(session.entityId, id).catch(() => null)
   if (!found) notFound()
 
-  const { doc, lines, allocatedMinor } = found
+  const { doc, lines, taxes, allocatedMinor } = found
   const state = settlementOf({
     status: doc.status,
     totalMinor: doc.totalMinor,
@@ -41,13 +41,21 @@ export default async function DocumentPage(props: PageProps<'/dashboard/invoices
     today: today(),
   })
 
+  // Group the components stored when the document was posted.
   const summary = taxSummary(
     lines.map((line) => ({
       lineSubtotalMinor: line.lineSubtotalMinor,
       lineDiscountMinor: line.lineDiscountMinor,
       lineTaxMinor: line.lineTaxMinor,
       lineTotalMinor: line.lineTotalMinor,
-      taxes: [],
+      taxes: taxes
+        .filter((tax) => tax.documentLineId === line.id)
+        .map((tax) => ({
+          component: tax.component as 'CGST' | 'SGST' | 'IGST',
+          ratePercent: tax.ratePercent,
+          taxableMinor: tax.taxableMinor,
+          amountMinor: tax.amountMinor,
+        })),
     })),
   )
 
