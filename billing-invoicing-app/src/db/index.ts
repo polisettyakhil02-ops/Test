@@ -9,6 +9,7 @@ import * as schema from '@/db/schema'
  */
 declare global {
   var _pgClient: ReturnType<typeof postgres> | undefined
+  var _db: ReturnType<typeof drizzle<typeof schema>> | undefined
 }
 
 function client() {
@@ -16,7 +17,7 @@ function client() {
 
   if (!url) {
     throw new Error(
-      'Missing DATABASE_URL. Add it to .env.local, then restart `npm run dev`.',
+      'Missing DATABASE_URL. Set it in the environment (or .env.local for local development).',
     )
   }
 
@@ -32,7 +33,33 @@ function client() {
   return globalThis._pgClient
 }
 
-export const db = drizzle(client(), { schema })
+function connection() {
+  if (!globalThis._db) globalThis._db = drizzle(client(), { schema })
+  return globalThis._db
+}
 
-export type Database = typeof db
+/**
+ * The database handle, connected on first use rather than on import.
+ *
+ * `next build` imports every route module to read its config, so connecting at
+ * module scope made DATABASE_URL a *build-time* requirement -- and a container
+ * image has no database to point at while it is being built. Deferring it means
+ * the build needs no database, and a genuinely missing variable still fails
+ * loudly, on the first query, with the message above.
+ *
+ * Methods are bound to the real instance so `this` inside drizzle never sees
+ * the proxy.
+ */
+export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
+  get(_target, property) {
+    const real = connection()
+    const value = Reflect.get(real, property, real)
+    return typeof value === 'function' ? value.bind(real) : value
+  },
+  has(_target, property) {
+    return Reflect.has(connection(), property)
+  },
+})
+
+export type Database = ReturnType<typeof drizzle<typeof schema>>
 export * from '@/db/schema'
