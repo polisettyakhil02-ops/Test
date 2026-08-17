@@ -301,6 +301,45 @@ describe('posting an invoice', () => {
     )
   })
 
+  test('the e-invoice stamp is the one edit a posted invoice accepts', async () => {
+    const { doc } = await makeDraft({
+      lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 25_000, taxRatePercent: '18' }],
+    })
+    await db.transaction(async (tx) => postInvoice(tx, doc.id))
+
+    const irn = 'a'.repeat(64)
+
+    await db
+      .update(documents)
+      .set({ irn, ackNo: '112410000123', ackDate: '2026-08-17 10:32:00', signedQrCode: 'eyJ.a.b' })
+      .where(eq(documents.id, doc.id))
+
+    const [stamped] = await db.select().from(documents).where(eq(documents.id, doc.id))
+    assert.equal(stamped.irn, irn)
+    assert.equal(stamped.status, 'posted')
+
+    // Write-once: an IRN is issued by the portal, not chosen by the seller.
+    await assert.rejects(
+      db.update(documents).set({ irn: 'b'.repeat(64) }).where(eq(documents.id, doc.id)),
+      rejectsWithMessage(/posted and cannot be edited/i),
+    )
+  })
+
+  test('nothing else may ride along with the e-invoice stamp', async () => {
+    const { doc } = await makeDraft({
+      lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 25_000, taxRatePercent: '18' }],
+    })
+    await db.transaction(async (tx) => postInvoice(tx, doc.id))
+
+    await assert.rejects(
+      db
+        .update(documents)
+        .set({ irn: 'c'.repeat(64), notes: 'quietly changed after issue' })
+        .where(eq(documents.id, doc.id)),
+      rejectsWithMessage(/posted and cannot be edited/i),
+    )
+  })
+
   test('posting twice is refused', async () => {
     const { doc } = await makeDraft({
       lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 5_000, taxRatePercent: '0' }],

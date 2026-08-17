@@ -2,7 +2,16 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { FileText, LayoutDashboard, Package, Scale, Timer, Users } from 'lucide-react'
+import {
+  FileSpreadsheet,
+  FileText,
+  LayoutDashboard,
+  Package,
+  Radio,
+  Scale,
+  Timer,
+  Users,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const LINKS = [
@@ -15,7 +24,10 @@ const LINKS = [
 const REPORTS = [
   { href: '/dashboard/reports/ageing', label: 'Ageing', icon: Timer },
   { href: '/dashboard/reports/trial-balance', label: 'Trial balance', icon: Scale },
+  { href: '/dashboard/reports/gstr1', label: 'GSTR-1', icon: FileSpreadsheet },
 ] as const
+
+const SYSTEM = [{ href: '/dashboard/outbox', label: 'Outbox', icon: Radio }] as const
 
 export function SidebarNav() {
   const pathname = usePathname()
@@ -47,6 +59,10 @@ export function SidebarNav() {
         Reports
       </p>
       {REPORTS.map((l) => item(l.href, l.label, l.icon))}
+      <p className="text-muted-foreground mt-4 px-3 pb-1 text-xs font-medium uppercase">
+        System
+      </p>
+      {SYSTEM.map((l) => item(l.href, l.label, l.icon))}
     </nav>
   )
 }

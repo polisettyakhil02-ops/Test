@@ -6,7 +6,13 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { documents, entities, parties } from '@/db/schema'
 import { requireRole } from '@/lib/session'
-import { invoiceSchema, paymentSchema, fieldErrors, type InvoiceInput } from '@/lib/validation'
+import {
+  invoiceSchema,
+  irnSchema,
+  paymentSchema,
+  fieldErrors,
+  type InvoiceInput,
+} from '@/lib/validation'
 import { parseMinor } from '@/domain/money'
 import { priceDocument, resolveSupplyKind } from '@/domain/pricing'
 import {
@@ -14,6 +20,7 @@ import {
   openBalanceMinor,
   postInvoice,
   postPayment,
+  recordAudit,
   replaceDocumentLines,
   reverseDocument,
 } from '@/domain/posting'
@@ -249,6 +256,84 @@ export async function deleteDraft(documentId: string): Promise<DeleteResult> {
 
   revalidatePath('/dashboard/invoices')
   return { ok: true, message: 'Draft deleted.' }
+}
+
+/**
+ * Stamps a posted invoice with what the IRP returned.
+ *
+ * The database allows this exact update and nothing else on a posted document:
+ * write-once, and no other column may ride along with it. See the
+ * `refuse_posted_document_edit` guard — the rule is enforced there rather than
+ * here, so a future code path cannot get it wrong.
+ */
+export async function recordIrn(
+  documentId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const session = await requireRole('accountant')
+
+  const parsed = irnSchema.safeParse({
+    irn: formData.get('irn'),
+    ackNo: formData.get('ackNo'),
+    ackDate: formData.get('ackDate'),
+    signedQrCode: formData.get('signedQrCode'),
+  })
+
+  if (!parsed.success) {
+    return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
+  }
+
+  const [existing] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.entityId, session.entityId), eq(documents.id, documentId)))
+    .limit(1)
+
+  if (!existing) return { error: 'That document no longer exists.', fieldErrors: {} }
+  if (existing.status !== 'posted') {
+    return { error: 'Only a posted document can carry an IRN.', fieldErrors: {} }
+  }
+  if (existing.irn) {
+    return {
+      error: 'This invoice already has an IRN. An IRN cannot be replaced once issued.',
+      fieldErrors: {},
+    }
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(documents)
+        .set({
+          irn: parsed.data.irn,
+          ackNo: parsed.data.ackNo,
+          ackDate: parsed.data.ackDate,
+          signedQrCode: parsed.data.signedQrCode,
+          updatedAt: new Date(),
+        })
+        .where(eq(documents.id, documentId))
+
+      await recordAudit(tx, {
+        entityId: session.entityId,
+        actorId: session.userId,
+        actorEmail: session.email,
+        action: 'einvoice.record',
+        recordType: 'document',
+        recordId: documentId,
+        after: { irn: parsed.data.irn, ackNo: parsed.data.ackNo, ackDate: parsed.data.ackDate },
+      })
+    })
+  } catch (error) {
+    const cause = (error as { cause?: { message?: string } })?.cause
+    return {
+      error: cause?.message ?? (error instanceof Error ? error.message : 'Could not record.'),
+      fieldErrors: {},
+    }
+  }
+
+  revalidatePath(`/dashboard/invoices/${documentId}`)
+  redirect(`/dashboard/invoices/${documentId}`)
 }
 
 /** Records a receipt and settles it against the chosen invoices. */

@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 
@@ -9,18 +9,16 @@ export function SearchInput({ placeholder }: { placeholder: string }) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
+
+  // The query string as a string, not as the object: a value that can be
+  // compared and used as an effect dependency without changing identity on
+  // every render.
+  const current = searchParams.toString()
   const [value, setValue] = useState(searchParams.get('q') ?? '')
-  const isFirstRender = useRef(true)
 
   useEffect(() => {
-    // Don't re-navigate on mount, only once the user actually types.
-    if (isFirstRender.current) {
-      isFirstRender.current = false
-      return
-    }
-
     const timeout = setTimeout(() => {
-      const params = new URLSearchParams(searchParams)
+      const params = new URLSearchParams(current)
 
       if (value) {
         params.set('q', value)
@@ -28,12 +26,23 @@ export function SearchInput({ placeholder }: { placeholder: string }) {
         params.delete('q')
       }
 
-      const query = params.toString()
-      router.replace(query ? `${pathname}?${query}` : pathname)
+      // A new search means a new result set, so page 3 of the old one is
+      // meaningless -- and usually empty, which reads as "no results".
+      params.delete('page')
+
+      const next = params.toString()
+
+      // Replacing the URL we are already on still counts as a navigation: it
+      // re-renders, hands back a fresh searchParams, and runs this effect
+      // again -- forever. Comparing first is what stops that, and it also
+      // makes the mount case a no-op without needing a first-render flag.
+      if (next === current) return
+
+      router.replace(next ? `${pathname}?${next}` : pathname)
     }, 300)
 
     return () => clearTimeout(timeout)
-  }, [value, pathname, router, searchParams])
+  }, [value, current, pathname, router])
 
   return (
     <div className="relative w-full max-w-xs">

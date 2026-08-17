@@ -47,14 +47,53 @@ async function main() {
   const sql = postgres(url, { max: 1 })
 
   try {
-    console.log('Applying migrations...')
+    // Which migrations this database has already seen. Without this, a second
+    // run would replay 0000_init and fail on the first CREATE TABLE -- and
+    // "safe to re-run" has to survive the arrival of a second migration.
+    await sql.unsafe(`
+      CREATE TABLE IF NOT EXISTS applied_migrations (
+        file       text PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+
+    // One-time backfill for databases created before this bookkeeping existed:
+    // if the schema is already there but nothing is recorded, the initial
+    // migration is what put it there.
+    const [{ bootstrapped }] = await sql<[{ bootstrapped: boolean }]>`
+      SELECT to_regclass('public.entities') IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM applied_migrations) AS bootstrapped
+    `
+    if (bootstrapped) {
+      await sql`INSERT INTO applied_migrations (file) VALUES ('0000_init.sql')`
+    }
+
+    const applied = new Set(
+      (await sql`SELECT file FROM applied_migrations`).map((row) => row.file as string),
+    )
+
     const dir = join(process.cwd(), 'src/db/migrations')
-    for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .filter((f) => !applied.has(f))
+
+    if (files.length === 0) {
+      console.log('Migrations already up to date.')
+    }
+
+    for (const file of files) {
+      console.log(`Applying ${file}...`)
       const content = readFileSync(join(dir, file), 'utf8')
-      for (const statement of content.split('--> statement-breakpoint')) {
-        const trimmed = statement.trim()
-        if (trimmed) await sql.unsafe(trimmed)
-      }
+      // One transaction per migration: a half-applied schema change is the one
+      // state there is no good way to recover from by hand.
+      await sql.begin(async (tx) => {
+        for (const statement of content.split('--> statement-breakpoint')) {
+          const trimmed = statement.trim()
+          if (trimmed) await tx.unsafe(trimmed)
+        }
+        await tx`INSERT INTO applied_migrations (file) VALUES (${file})`
+      })
     }
 
     console.log('Applying ledger guards...')

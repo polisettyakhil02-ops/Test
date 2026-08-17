@@ -41,11 +41,13 @@ export default async function DashboardPage() {
   const session = await requireSession()
   const asOf = today()
 
-  const [totals, ageing, recent] = await Promise.all([
+  const [totals, ageing, recentPage] = await Promise.all([
     dashboardTotals(db, session.entityId, asOf),
     ageingReport(db, session.entityId, asOf),
-    listDocuments(session.entityId, { docType: 'invoice', limit: 6 }),
+    listDocuments(session.entityId, { docType: 'invoice', pageSize: 6 }),
   ])
+
+  const recent = recentPage.rows
 
   return (
     <div className="flex flex-col gap-6">

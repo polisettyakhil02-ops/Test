@@ -20,12 +20,21 @@ npx auth secret              # writes AUTH_SECRET
 npm run setup -- --email you@company.com --password "your-password" \
                  --company "Acme Pvt Ltd" --state 29
 
+# Your own GSTIN and address -- needed for a compliant invoice and for e-invoicing.
+npm run entity -- --gstin 29AABCU9603R1ZX \
+                  --legal-name "Acme Private Limited" \
+                  --address "4th Floor, 22 MG Road" --address "Bengaluru - 560001"
+
 npm run dev
 ```
 
-`npm run setup` applies the migrations and ledger guards, then creates the
-entity, an eight-account chart of accounts, twelve monthly periods, the number
-series and your admin user. It is safe to re-run.
+`npm run setup` applies any migrations this database has not seen, re-applies
+the ledger guards, then creates the entity, an eight-account chart of accounts,
+twelve monthly periods, the number series and your admin user. It records what
+it has applied in `applied_migrations`, so it is safe to re-run.
+
+`npm run entity` with no flags prints what is currently set, including whether
+you still need a GSTIN or a PIN code.
 
 There is no public sign-up.
 
@@ -36,7 +45,9 @@ There is no public sign-up.
 | `npm run dev` | Dev server |
 | `npm run build` | Production build |
 | `npm run setup` | Migrations, seed data and the admin user |
-| `npm test` | Ledger integration tests against real PostgreSQL |
+| `npm run entity` | Show or set your own GSTIN, address and bank details |
+| `npm run outbox` | Deliver queued events (`-- --once` for cron) |
+| `npm test` | Domain and ledger tests against real PostgreSQL |
 | `npm run dev:db` | A local PostgreSQL on :5432, backed by PGlite (no install needed) |
 | `npm run db:generate` | Regenerate migrations after a schema change |
 | `npm run lint` | ESLint |
@@ -100,16 +111,88 @@ total to the paisa.
 Tax is charged on the **post-discount** amount. Charging it on the pre-discount
 value overstates GST on every discounted invoice.
 
+### GSTR-1
+
+`/dashboard/reports/gstr1` splits a period's posted documents into the sections
+the return is actually filed in, and exports them as CSV. Which section a
+document belongs to is decided by the buyer, not by you:
+
+| Section | What lands there |
+|---|---|
+| **B2B** | Buyer has a GSTIN. Reported invoice by invoice. |
+| **B2CL** | Unregistered, inter-state, **above** ₹2,50,000. |
+| **B2CS** | Everything else to unregistered buyers, summarised per place of supply and rate. |
+| **CDNR** | Credit notes to registered buyers, against the invoice each corrects. |
+| **HSN** | A summary by HSN/SAC across the whole return. |
+
+Credit notes to unregistered buyers are netted off inside B2CS rather than
+reported separately, and a credit note's values carry a negative sign
+everywhere else. Getting this split wrong is one of the most common reasons a
+small business's return fails validation, so the rule lives in one function and
+is tested on its own.
+
+### e-Invoicing (IRN and QR)
+
+A registered B2B invoice is not a valid tax invoice until an Invoice
+Registration Portal has issued it an IRN, and the printed copy has to carry the
+signed QR the portal returns.
+
+The document page builds the NIC 1.1 payload and tells you plainly whether the
+invoice can be registered — missing GSTIN, missing PIN code, lines without an
+HSN code. You download the payload, register it through whichever portal you
+use, and paste back the IRN, acknowledgement and signed QR string; the QR is
+then rendered onto the PDF.
+
+**It deliberately does not call an IRP.** That needs a GSP contract and
+credentials this business does not have, and a half-configured HTTP client that
+fails at filing time is worse than an explicit hand-off. When credentials
+exist, the download becomes a POST and nothing else changes.
+
+The IRN is **write-once**, enforced by the database: a posted document accepts
+the e-invoice stamp and nothing else, and only when it has no IRN already.
+
+## Statements
+
+`/dashboard/clients/<id>/statement` is the customer's receivable account read
+straight off the ledger — opening balance, movements, closing balance, with a
+CSV to send them. Building it from documents would let it disagree with the
+trial balance the moment something is voided; building it from AR journal lines
+means it cannot.
+
+## Outbound events
+
+Posting queues an event in `outbox`, inside the same transaction as the ledger
+entry. `npm run outbox` drains it:
+
+- signed `X-Billing-Signature: t=<unix>,v1=<hmac-sha256 of "<t>.<body>">`, with
+  the timestamp **inside** the signed string so a captured request cannot be
+  replayed later
+- exponential backoff, 1 minute doubling to an hour, then dead-lettered after
+  eight attempts
+- claimed with `FOR UPDATE SKIP LOCKED`, so several workers share the queue
+  rather than double-delivering
+- **at-least-once**: the receiver must dedupe on `X-Billing-Delivery`
+
+`/dashboard/outbox` shows what is pending, delivered or given up on, and lets an
+admin retry or drain on demand. With no endpoint configured, events simply
+queue — nothing is lost.
+
 ## Testing
 
-`npm test` runs the ledger against **real PostgreSQL 18**, in-process via
-PGlite (WASM) — not a mock, not SQLite. The constraints and triggers under test
-are the ones production gets, which is why these three cases are testable at
-all:
+`npm test` runs against **real PostgreSQL 18**, in-process via PGlite (WASM) —
+not a mock, not SQLite. The constraints and triggers under test are the ones
+production gets, which is why these cases are testable at all:
 
 - a rolled-back posting does not consume an invoice number
 - eight concurrent postings never issue the same number
 - a posting refused by a closed period writes nothing whatsoever
+- the e-invoice stamp is the one edit a posted document accepts, and nothing
+  else may ride along with it
+
+The domain modules are tested as plain functions where they are plain functions:
+GSTR-1 sectioning, the IRP payload, signature verification (against an
+independent verifier rather than against itself), backoff, and statements
+reconciled against the ledger balance they must agree with.
 
 ### Running the app without installing PostgreSQL
 
@@ -125,10 +208,17 @@ is a single WASM instance and serves one connection at a time, so set
 `DATABASE_POOL_MAX=1` when pointing at it. A real PostgreSQL has no such
 limit — that is a property of the harness, not the app.
 
-`test/e2e-flow.js` drives the whole business flow through a browser against
-that server: sign in, create a client and item, draft an invoice from the item
-master, post it, check the trial balance balances, take a partial payment,
-raise and post a credit note, and download the PDF.
+Three browser flows drive the app against that server, with
+`NODE_PATH` pointing at a Playwright install:
+
+| Flow | Covers |
+|---|---|
+| `test/e2e-flow.js` | Sign in, client, item, draft from the item master, post, trial balance, partial payment, credit note, PDF |
+| `test/e2e-einvoice.js` | Registered inter-state buyer, IGST, IRP payload shape, rejecting a malformed IRN, stamping a real one, IRN and QR on the printed PDF, B2B on the return |
+| `test/e2e-outstanding.js` | Statements and their CSV, GSTR-1 and its CSV, e-invoice blockers, the outbox screen, pagination |
+
+`e2e-einvoice.js` needs the entity to have a GSTIN and a PIN-coded address —
+run `npm run entity` first.
 
 ## Reports
 
@@ -150,7 +240,11 @@ create `middleware.ts`; that name is deprecated here.
 
 ## Not built yet
 
-e-invoicing (IRN/QR) and GSTR-1 export · webhook delivery (outbox rows are
-written but nothing drains them) · customer statements · email delivery ·
-multi-currency · purchase side (bills, AP) · bank reconciliation · recurring
-invoices · approval workflows · custom fields · pagination beyond 200 rows.
+Email delivery · multi-currency · the purchase side (bills, AP) · bank
+reconciliation · recurring invoices · approval workflows · custom fields · a UI
+for the chart of accounts and period close · GSTR-3B · IRP cancellation within
+the 24-hour window.
+
+Two deliberate hand-offs rather than gaps: e-invoicing stops at the payload
+because calling an IRP needs a GSP contract, and outbound events stop at a
+signed HTTP POST because what consumes them is not this application's business.

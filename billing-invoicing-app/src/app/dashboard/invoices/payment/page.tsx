@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { ArrowLeft, Users } from 'lucide-react'
 import { requireRole } from '@/lib/session'
-import { listParties, openInvoicesFor } from '@/lib/queries'
+import { allParties, openInvoicesFor } from '@/lib/queries'
 import { PaymentForm } from '@/app/dashboard/invoices/payment/payment-form'
 import { Button } from '@/components/ui/button'
 
@@ -12,7 +12,7 @@ export default async function PaymentPage(props: PageProps<'/dashboard/invoices/
   const session = await requireRole('accountant')
   const params = await props.searchParams
 
-  const parties = await listParties(session.entityId, '')
+  const parties = await allParties(session.entityId)
   const selected = typeof params.partyId === 'string' ? params.partyId : parties[0]?.id ?? ''
   const openInvoices = selected ? await openInvoicesFor(session.entityId, selected) : []
 

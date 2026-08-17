@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { entities } from '@/db/schema'
 import { requireRole } from '@/lib/session'
-import { getDocument, listItems, listParties } from '@/lib/queries'
+import { allItems, allParties, getDocument } from '@/lib/queries'
 import { InvoiceForm } from '@/app/dashboard/invoices/invoice-form'
 import { Button } from '@/components/ui/button'
 
@@ -23,8 +23,8 @@ export default async function EditInvoicePage(props: PageProps<'/dashboard/invoi
   if (found.doc.status !== 'draft') redirect(`/dashboard/invoices/${id}`)
 
   const [parties, items, [org]] = await Promise.all([
-    listParties(session.entityId, ''),
-    listItems(session.entityId, ''),
+    allParties(session.entityId),
+    allItems(session.entityId),
     db.select().from(entities).where(eq(entities.id, session.entityId)).limit(1),
   ])
 

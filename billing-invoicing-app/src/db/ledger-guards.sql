@@ -69,14 +69,16 @@ CREATE TRIGGER journal_lines_immutable
   FOR EACH ROW EXECUTE FUNCTION refuse_ledger_mutation();
 
 -- ---------------------------------------------------------------------------
--- 3. A posted document is immutable except for its void stamp.
+-- 3. A posted document is immutable except for two stamps.
 --
--- Drafts stay freely editable; posting is the one-way door. Allowing the void
--- columns through is what makes voiding possible without opening the rest.
+-- Drafts stay freely editable; posting is the one-way door. Two narrow
+-- exceptions are what make voiding and e-invoicing possible without opening the
+-- rest of the record back up.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION refuse_posted_document_edit() RETURNS trigger AS $$
 BEGIN
   IF OLD.status = 'posted' THEN
+    -- (a) The void stamp.
     IF NEW.status = 'voided'
        AND NEW.doc_number      IS NOT DISTINCT FROM OLD.doc_number
        AND NEW.total_minor     IS NOT DISTINCT FROM OLD.total_minor
@@ -84,6 +86,20 @@ BEGIN
        AND NEW.tax_minor       IS NOT DISTINCT FROM OLD.tax_minor
        AND NEW.party_id        IS NOT DISTINCT FROM OLD.party_id
        AND NEW.issue_date      IS NOT DISTINCT FROM OLD.issue_date THEN
+      RETURN NEW;
+    END IF;
+
+    -- (b) The e-invoicing stamp: what the IRP handed back after registration.
+    --
+    -- Write-once, and nothing else may ride along with it. Comparing the whole
+    -- row minus exactly these columns is stricter than listing the fields that
+    -- must not change -- a column added later is frozen by default rather than
+    -- silently editable.
+    IF NEW.status = 'posted'
+       AND OLD.irn IS NULL
+       AND NEW.irn IS NOT NULL
+       AND to_jsonb(NEW) - 'irn' - 'ack_no' - 'ack_date' - 'signed_qr_code' - 'updated_at'
+         = to_jsonb(OLD) - 'irn' - 'ack_no' - 'ack_date' - 'signed_qr_code' - 'updated_at' THEN
       RETURN NEW;
     END IF;
 

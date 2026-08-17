@@ -1,10 +1,11 @@
 import Link from 'next/link'
-import { Pencil, Plus, Users } from 'lucide-react'
+import { Pencil, Plus, Receipt, Users } from 'lucide-react'
 import { requireSession } from '@/lib/session'
 import { listParties } from '@/lib/queries'
 import { deleteParty } from '@/app/dashboard/clients/actions'
-import { formatAddress, stateName } from '@/lib/dto'
+import { formatAddress, pageParam, stateName } from '@/lib/dto'
 import { DeleteButton } from '@/components/delete-button'
+import { Pagination } from '@/components/pagination'
 import { SearchInput } from '@/components/search-input'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -16,7 +17,8 @@ export default async function ClientsPage(props: PageProps<'/dashboard/clients'>
   const session = await requireSession()
   const params = await props.searchParams
   const query = typeof params.q === 'string' ? params.q.trim() : ''
-  const rows = await listParties(session.entityId, query)
+  const page = pageParam(params.page)
+  const { rows, total, pageCount, pageSize } = await listParties(session.entityId, query, { page })
 
   return (
     <div className="flex flex-col gap-6">
@@ -24,7 +26,7 @@ export default async function ClientsPage(props: PageProps<'/dashboard/clients'>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Clients</h1>
           <p className="text-muted-foreground text-sm">
-            {rows.length} {rows.length === 1 ? 'client' : 'clients'}
+            {total} {total === 1 ? 'client' : 'clients'}
             {query ? ` matching “${query}”` : ''}
           </p>
         </div>
@@ -93,6 +95,16 @@ export default async function ClientsPage(props: PageProps<'/dashboard/clients'>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        asChild
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Statement for ${party.name}`}
+                      >
+                        <Link href={`/dashboard/clients/${party.id}/statement`}>
+                          <Receipt className="size-4" />
+                        </Link>
+                      </Button>
                       <Button asChild variant="ghost" size="icon" aria-label={`Edit ${party.name}`}>
                         <Link href={`/dashboard/clients/${party.id}/edit`}>
                           <Pencil className="size-4" />
@@ -110,6 +122,16 @@ export default async function ClientsPage(props: PageProps<'/dashboard/clients'>
             </TableBody>
           </Table>
         )}
+
+        <Pagination
+          page={page}
+          pageCount={pageCount}
+          total={total}
+          pageSize={pageSize}
+          basePath="/dashboard/clients"
+          params={query ? { q: query } : {}}
+          noun="clients"
+        />
       </div>
     </div>
   )

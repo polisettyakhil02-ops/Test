@@ -4,6 +4,7 @@ import { db } from '@/db'
 import { entities } from '@/db/schema'
 import { requireSession } from '@/lib/session'
 import { getDocument } from '@/lib/queries'
+import { qrDataUrl } from '@/lib/qr'
 import { InvoicePdf } from '@/lib/pdf/invoice-pdf'
 
 export const dynamic = 'force-dynamic'
@@ -27,6 +28,8 @@ export async function GET(
     .where(eq(entities.id, session.entityId))
     .limit(1)
 
+  const qr = found.doc.signedQrCode ? await qrDataUrl(found.doc.signedQrCode, 300) : null
+
   const buffer = await renderToBuffer(
     <InvoicePdf
       invoice={{
@@ -45,6 +48,10 @@ export async function GET(
         supplyKind: found.doc.supplyKind,
         notes: found.doc.notes,
         terms: found.doc.terms,
+        irn: found.doc.irn,
+        ackNo: found.doc.ackNo,
+        ackDate: found.doc.ackDate,
+        qrDataUrl: qr,
         lines: found.lines.map((line) => ({
           id: line.id,
           description: line.description,

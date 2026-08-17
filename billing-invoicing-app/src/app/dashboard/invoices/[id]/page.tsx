@@ -6,7 +6,11 @@ import { db } from '@/db'
 import { accounts, journalEntries, journalLines } from '@/db/schema'
 import { requireSession } from '@/lib/session'
 import { getDocument } from '@/lib/queries'
+import { einvoiceInputFor } from '@/lib/einvoice-input'
+import { einvoiceBlockers } from '@/domain/einvoice'
+import { qrDataUrl } from '@/lib/qr'
 import { postDocument, voidDocument } from '@/app/dashboard/invoices/actions'
+import { EinvoicePanel } from '@/app/dashboard/invoices/[id]/einvoice-panel'
 import { taxSummary } from '@/domain/pricing'
 import {
   DOC_TYPE_LABELS,
@@ -80,6 +84,16 @@ export default async function DocumentPage(props: PageProps<'/dashboard/invoices
 
   const isDraft = doc.status === 'draft'
   const isInvoice = doc.docType === 'invoice'
+
+  // e-Invoicing only concerns posted invoices and credit notes. Working out
+  // whether this one is registrable is the same code the payload route runs, so
+  // the panel cannot promise something the download then refuses.
+  const einvoice =
+    doc.status === 'posted' && doc.docType !== 'payment'
+      ? await einvoiceInputFor(session.entityId, doc.id)
+      : null
+
+  const einvoiceQr = doc.signedQrCode ? await qrDataUrl(doc.signedQrCode) : null
 
   return (
     <div className="flex flex-col gap-6">
@@ -249,6 +263,19 @@ export default async function DocumentPage(props: PageProps<'/dashboard/invoices
             </div>
           </div>
         </div>
+      ) : null}
+
+      {einvoice ? (
+        <EinvoicePanel
+          documentId={doc.id}
+          blockers={einvoiceBlockers(einvoice.input)}
+          recorded={
+            doc.irn
+              ? { irn: doc.irn, ackNo: doc.ackNo ?? '', ackDate: doc.ackDate ?? '' }
+              : null
+          }
+          qrDataUrl={einvoiceQr}
+        />
       ) : null}
 
       {entryLines.length > 0 ? (

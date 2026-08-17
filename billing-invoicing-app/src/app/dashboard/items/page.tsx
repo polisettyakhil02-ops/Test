@@ -3,8 +3,9 @@ import { Package, Pencil, Plus } from 'lucide-react'
 import { requireSession } from '@/lib/session'
 import { listItems } from '@/lib/queries'
 import { deleteItem } from '@/app/dashboard/items/actions'
-import { formatMoney } from '@/lib/dto'
+import { formatMoney, pageParam } from '@/lib/dto'
 import { DeleteButton } from '@/components/delete-button'
+import { Pagination } from '@/components/pagination'
 import { SearchInput } from '@/components/search-input'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -16,7 +17,8 @@ export default async function ItemsPage(props: PageProps<'/dashboard/items'>) {
   const session = await requireSession()
   const params = await props.searchParams
   const query = typeof params.q === 'string' ? params.q.trim() : ''
-  const rows = await listItems(session.entityId, query)
+  const page = pageParam(params.page)
+  const { rows, total, pageCount, pageSize } = await listItems(session.entityId, query, { page })
 
   return (
     <div className="flex flex-col gap-6">
@@ -24,7 +26,7 @@ export default async function ItemsPage(props: PageProps<'/dashboard/items'>) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Items</h1>
           <p className="text-muted-foreground text-sm">
-            {rows.length} {rows.length === 1 ? 'item' : 'items'}
+            {total} {total === 1 ? 'item' : 'items'}
             {query ? ` matching “${query}”` : ''}
           </p>
         </div>
@@ -107,6 +109,16 @@ export default async function ItemsPage(props: PageProps<'/dashboard/items'>) {
             </TableBody>
           </Table>
         )}
+
+        <Pagination
+          page={page}
+          pageCount={pageCount}
+          total={total}
+          pageSize={pageSize}
+          basePath="/dashboard/items"
+          params={query ? { q: query } : {}}
+          noun="items"
+        />
       </div>
     </div>
   )

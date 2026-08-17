@@ -1,6 +1,10 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/db'
 import { documentLineTaxes, documentLines, documents, items, parties } from '@/db/schema'
+import { PAGE_SIZE, paged, pageOffset, type Page } from '@/lib/paging'
+
+export { PAGE_SIZE, pageOffset, type Page } from '@/lib/paging'
 
 /**
  * Read-side queries shared by the pages.
@@ -15,7 +19,14 @@ function likePattern(query: string): string {
   return `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 }
 
-export async function listParties(entityId: string, query: string) {
+export async function listParties(
+  entityId: string,
+  query: string,
+  options: { page?: number; pageSize?: number } = {},
+): Promise<Page<typeof parties.$inferSelect>> {
+  const page = Math.max(options.page ?? 1, 1)
+  const pageSize = options.pageSize ?? PAGE_SIZE
+
   const where = query
     ? and(
         eq(parties.entityId, entityId),
@@ -27,7 +38,20 @@ export async function listParties(entityId: string, query: string) {
       )
     : eq(parties.entityId, entityId)
 
-  return db.select().from(parties).where(where).orderBy(asc(parties.name))
+  // Sequential rather than Promise.all on purpose: `npm run dev:db` serves a
+  // single-connection PGlite, and issuing two queries at once against it is a
+  // property of the harness that has no business shaping the query layer.
+  const rows = await db
+    .select()
+    .from(parties)
+    .where(where)
+    .orderBy(asc(parties.name))
+    .limit(pageSize)
+    .offset(pageOffset(page, pageSize))
+
+  const [totals] = await db.select({ value: count() }).from(parties).where(where)
+
+  return paged(rows, Number(totals?.value ?? 0), page, pageSize)
 }
 
 export async function getParty(entityId: string, id: string) {
@@ -39,7 +63,14 @@ export async function getParty(entityId: string, id: string) {
   return row ?? null
 }
 
-export async function listItems(entityId: string, query: string) {
+export async function listItems(
+  entityId: string,
+  query: string,
+  options: { page?: number; pageSize?: number } = {},
+): Promise<Page<typeof items.$inferSelect>> {
+  const page = Math.max(options.page ?? 1, 1)
+  const pageSize = options.pageSize ?? PAGE_SIZE
+
   const where = query
     ? and(
         eq(items.entityId, entityId),
@@ -51,7 +82,43 @@ export async function listItems(entityId: string, query: string) {
       )
     : eq(items.entityId, entityId)
 
-  return db.select().from(items).where(where).orderBy(asc(items.name))
+  const rows = await db
+    .select()
+    .from(items)
+    .where(where)
+    .orderBy(asc(items.name))
+    .limit(pageSize)
+    .offset(pageOffset(page, pageSize))
+
+  const [totals] = await db.select({ value: count() }).from(items).where(where)
+
+  return paged(rows, Number(totals?.value ?? 0), page, pageSize)
+}
+
+/**
+ * Whole-list reads for the form pickers, which need every option in one <select>
+ * rather than a page of them. Still bounded: a picker with more entries than
+ * this needs to become a search box, and silently truncating is better than
+ * silently loading forever.
+ */
+export const PICKER_LIMIT = 500
+
+export async function allItems(entityId: string) {
+  return db
+    .select()
+    .from(items)
+    .where(eq(items.entityId, entityId))
+    .orderBy(asc(items.name))
+    .limit(PICKER_LIMIT)
+}
+
+export async function allParties(entityId: string) {
+  return db
+    .select()
+    .from(parties)
+    .where(eq(parties.entityId, entityId))
+    .orderBy(asc(parties.name))
+    .limit(PICKER_LIMIT)
 }
 
 export async function getItem(entityId: string, id: string) {
@@ -83,8 +150,16 @@ export interface DocumentListRow {
  */
 export async function listDocuments(
   entityId: string,
-  options: { docType?: 'invoice' | 'credit_note' | 'payment'; status?: string; query?: string; limit?: number },
-): Promise<DocumentListRow[]> {
+  options: {
+    docType?: 'invoice' | 'credit_note' | 'payment'
+    status?: string
+    query?: string
+    page?: number
+    pageSize?: number
+  },
+): Promise<Page<DocumentListRow>> {
+  const page = Math.max(options.page ?? 1, 1)
+  const pageSize = options.pageSize ?? PAGE_SIZE
   const conditions = [eq(documents.entityId, entityId)]
 
   if (options.docType) conditions.push(eq(documents.docType, options.docType))
@@ -118,9 +193,128 @@ export async function listDocuments(
     .from(documents)
     .where(and(...conditions))
     .orderBy(desc(documents.issueDate), desc(documents.createdAt))
-    .limit(options.limit ?? 200)
+    .limit(pageSize)
+    .offset(pageOffset(page, pageSize))
 
-  return rows.map((row) => ({ ...row, allocatedMinor: Number(row.allocatedMinor) }))
+  const [totals] = await db
+    .select({ value: count() })
+    .from(documents)
+    .where(and(...conditions))
+
+  return paged(
+    rows.map((row) => ({ ...row, allocatedMinor: Number(row.allocatedMinor) })),
+    Number(totals?.value ?? 0),
+    page,
+    pageSize,
+  )
+}
+
+/**
+ * Everything a GST return needs for a period, in one read.
+ *
+ * The join back to `documents` resolves the invoice a credit note corrects:
+ * CDNR reports the original invoice's number and date, not the note's.
+ */
+export interface ReturnDocumentRow {
+  docType: 'invoice' | 'credit_note' | 'payment'
+  docNumber: string
+  issueDate: string
+  status: string
+  buyerGstin: string
+  buyerName: string
+  placeOfSupply: string
+  supplyKind: string
+  totalMinor: number
+  correctsDocNumber: string | null
+  correctsDocDate: string | null
+  lines: Array<{
+    description: string
+    hsnSac: string
+    unit: string
+    quantity: string
+    taxRatePercent: string
+    lineSubtotalMinor: number
+    lineDiscountMinor: number
+    lineTaxMinor: number
+  }>
+}
+
+export async function listReturnDocuments(
+  entityId: string,
+  period: { from: string; to: string },
+): Promise<ReturnDocumentRow[]> {
+  const corrected = alias(documents, 'corrected')
+
+  const docs = await db
+    .select({
+      id: documents.id,
+      docType: documents.docType,
+      docNumber: documents.docNumber,
+      issueDate: documents.issueDate,
+      status: documents.status,
+      partySnapshot: documents.partySnapshot,
+      placeOfSupply: documents.placeOfSupply,
+      supplyKind: documents.supplyKind,
+      totalMinor: documents.totalMinor,
+      correctsDocNumber: corrected.docNumber,
+      correctsDocDate: corrected.issueDate,
+    })
+    .from(documents)
+    .leftJoin(corrected, eq(documents.correctsDocumentId, corrected.id))
+    .where(
+      and(
+        eq(documents.entityId, entityId),
+        eq(documents.status, 'posted'),
+        sql`${documents.docType} <> 'payment'`,
+        sql`${documents.issueDate} >= ${period.from}`,
+        sql`${documents.issueDate} <= ${period.to}`,
+      ),
+    )
+    .orderBy(asc(documents.issueDate), asc(documents.docNumber))
+
+  if (docs.length === 0) return []
+
+  const lines = await db
+    .select()
+    .from(documentLines)
+    .where(
+      inArray(
+        documentLines.documentId,
+        docs.map((doc) => doc.id),
+      ),
+    )
+    .orderBy(asc(documentLines.lineNo))
+
+  const byDocument = new Map<string, typeof lines>()
+  for (const line of lines) {
+    const bucket = byDocument.get(line.documentId) ?? []
+    bucket.push(line)
+    byDocument.set(line.documentId, bucket)
+  }
+
+  return docs.map((doc) => ({
+    docType: doc.docType as 'invoice' | 'credit_note',
+    docNumber: doc.docNumber ?? '',
+    issueDate: doc.issueDate,
+    status: doc.status,
+    buyerGstin: doc.partySnapshot.gstin ?? '',
+    buyerName: doc.partySnapshot.name ?? '',
+    placeOfSupply: doc.placeOfSupply || (doc.partySnapshot.stateCode ?? ''),
+    supplyKind: doc.supplyKind,
+    totalMinor: doc.totalMinor,
+    correctsDocNumber: doc.correctsDocNumber,
+    correctsDocDate: doc.correctsDocDate,
+    lines: (byDocument.get(doc.id) ?? []).map((line) => ({
+      description: line.description,
+      hsnSac: line.hsnSac,
+      unit: line.unit,
+      quantity: line.quantity,
+      taxRatePercent: line.taxRatePercent,
+      lineSubtotalMinor: line.lineSubtotalMinor,
+      lineDiscountMinor: line.lineDiscountMinor,
+      lineTaxMinor: line.lineTaxMinor,
+    })),
+  }))
 }
 
 export async function getDocument(entityId: string, id: string) {

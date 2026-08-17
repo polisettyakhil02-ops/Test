@@ -129,6 +129,25 @@ export const paymentSchema = z.object({
 
 export type PaymentInput = z.infer<typeof paymentSchema>
 
+/**
+ * What an IRP hands back after registering an invoice.
+ *
+ * The IRN is a 64-character SHA-256 hex digest; checking the shape here catches
+ * a mis-paste before it is stamped onto a document that can never be edited
+ * again.
+ */
+export const irnSchema = z.object({
+  irn: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-f]{64}$/i, 'An IRN is 64 hexadecimal characters'),
+  ackNo: z.string().trim().min(1, 'Enter the acknowledgement number'),
+  ackDate: z.string().trim().min(1, 'Enter the acknowledgement date'),
+  signedQrCode: z.string().trim().min(1, 'Paste the signed QR string'),
+})
+
+export type IrnInput = z.infer<typeof irnSchema>
+
 export function fieldErrors(error: z.ZodError): Record<string, string> {
   const result: Record<string, string> = {}
   for (const issue of error.issues) {

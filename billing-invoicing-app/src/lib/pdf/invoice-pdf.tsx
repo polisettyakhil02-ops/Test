@@ -1,5 +1,5 @@
 import React from 'react'
-import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
+import { Document, Image, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
 import { taxSummary, type PricedLine } from '@/domain/pricing'
 import { formatMoneyPlain, formatDate } from '@/lib/dto'
 
@@ -29,6 +29,11 @@ export interface PdfDocument {
   supplyKind: string
   notes: string
   terms: string
+  irn: string | null
+  ackNo: string | null
+  ackDate: string | null
+  /** A PNG data URI of the signed QR string, or null when unregistered. */
+  qrDataUrl: string | null
   lines: Array<{
     id: string
     description: string
@@ -139,6 +144,19 @@ const styles = StyleSheet.create({
   // applies to wrapped lines rather than inflating a single-line block.
   bodyText: { lineHeight: 1.4 },
   bankBlock: { marginTop: 18 },
+
+  irnBlock: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 18,
+    padding: 10,
+    borderWidth: 0.5,
+    borderColor: '#e5e7eb',
+    borderRadius: 3,
+  },
+  irnQr: { width: 78, height: 78 },
+  irnFields: { flexGrow: 1, justifyContent: 'center' },
+  irnValue: { fontFamily: 'Helvetica-Bold', fontSize: 7.5 },
 
   footer: {
     position: 'absolute',
@@ -273,6 +291,28 @@ export function InvoicePdf({ invoice, company }: InvoicePdfProps) {
             </Text>
           </View>
         </View>
+
+        {/* Under the e-invoicing mandate a registered invoice must carry the
+            signed QR the IRP returned; without it the printed copy is not a
+            valid tax invoice. */}
+        {invoice.irn ? (
+          <View style={styles.irnBlock} wrap={false}>
+            {invoice.qrDataUrl ? (
+              // react-pdf's <Image>, not an HTML one -- a PDF image has no alt
+              // attribute for the a11y rule to check.
+              // eslint-disable-next-line jsx-a11y/alt-text
+              <Image src={invoice.qrDataUrl} style={styles.irnQr} />
+            ) : null}
+            <View style={styles.irnFields}>
+              <Text style={styles.sectionLabel}>e-INVOICE</Text>
+              <Text style={styles.muted}>IRN</Text>
+              <Text style={styles.irnValue}>{invoice.irn}</Text>
+              <Text style={[styles.muted, { marginTop: 4 }]}>
+                Ack. {invoice.ackNo ?? '-'} · {invoice.ackDate ?? '-'}
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.table}>
           {/* `fixed` repeats the header if the table spills onto a second page. */}

@@ -7,12 +7,14 @@ import {
   DOC_TYPE_LABELS,
   formatDate,
   formatMoney,
+  pageParam,
   settlementOf,
   SETTLEMENT_LABELS,
   SETTLEMENT_VARIANTS,
   today,
 } from '@/lib/dto'
 import { DeleteButton } from '@/components/delete-button'
+import { Pagination } from '@/components/pagination'
 import { SearchInput } from '@/components/search-input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,9 +38,16 @@ export default async function InvoicesPage(props: PageProps<'/dashboard/invoices
   const rawType = typeof params.docType === 'string' ? params.docType : ''
   const docType = (['invoice', 'credit_note', 'payment'] as const).find((t) => t === rawType)
   const asOf = today()
+  const page = pageParam(params.page)
 
-  const rows = await listDocuments(session.entityId, { docType, query })
+  const { rows, total, pageCount, pageSize } = await listDocuments(session.entityId, {
+    docType,
+    query,
+    page,
+  })
 
+  // Switching tab is a new result set, so the page number is dropped rather
+  // than carried over onto a filter it does not apply to.
   const href = (type: string) => {
     const p = new URLSearchParams()
     if (query) p.set('q', query)
@@ -47,13 +56,17 @@ export default async function InvoicesPage(props: PageProps<'/dashboard/invoices
     return s ? `/dashboard/invoices?${s}` : '/dashboard/invoices'
   }
 
+  const pageParams: Record<string, string> = {}
+  if (query) pageParams.q = query
+  if (docType) pageParams.docType = docType
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
           <p className="text-muted-foreground text-sm">
-            {rows.length} {rows.length === 1 ? 'document' : 'documents'}
+            {total} {total === 1 ? 'document' : 'documents'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -176,6 +189,16 @@ export default async function InvoicesPage(props: PageProps<'/dashboard/invoices
             </TableBody>
           </Table>
         )}
+
+        <Pagination
+          page={page}
+          pageCount={pageCount}
+          total={total}
+          pageSize={pageSize}
+          basePath="/dashboard/invoices"
+          params={pageParams}
+          noun="documents"
+        />
       </div>
     </div>
   )

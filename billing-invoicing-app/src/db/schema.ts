@@ -300,6 +300,13 @@ export const documents = pgTable(
     notes: text('notes').notNull().default(''),
     terms: text('terms').notNull().default(''),
 
+    // e-invoicing (IRP). Recorded after the invoice is registered; the QR
+    // string is what the printed invoice must carry.
+    irn: text('irn'),
+    ackNo: text('ack_no'),
+    ackDate: text('ack_date'),
+    signedQrCode: text('signed_qr_code'),
+
     postedAt: timestamp('posted_at', { withTimezone: true }),
     postedBy: uuid('posted_by').references(() => users.id, { onDelete: 'set null' }),
     voidedAt: timestamp('voided_at', { withTimezone: true }),
@@ -494,8 +501,13 @@ export const outbox = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     attempts: integer('attempts').notNull().default(0),
+    // When the drain worker may next pick this row up. Backoff is stored rather
+    // than computed at read time so a failing endpoint cannot be retried by two
+    // workers on different clocks.
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    lastError: text('last_error').notNull().default(''),
   },
-  (t) => [index('outbox_undelivered_idx').on(t.deliveredAt)],
+  (t) => [index('outbox_undelivered_idx').on(t.deliveredAt, t.nextAttemptAt)],
 )
 
 // ---------------------------------------------------------------------------
