@@ -40,4 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-.devdb/
+# The local PGlite database, plus any copy set aside after a crash. The glob
+# matters: `.devdb/` alone does not cover `.devdb.corrupt-1234/`, and 40MB of
+# database binaries are one `git add -A` away from a commit.
+.devdb*/

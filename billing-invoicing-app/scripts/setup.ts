@@ -44,7 +44,16 @@ async function main() {
     process.exit(1)
   }
 
-  const sql = postgres(url, { max: 1 })
+  const sql = postgres(url, {
+    max: 1,
+    // This script is written to be re-runnable, so every IF EXISTS / IF NOT
+    // EXISTS raises a "... skipping" notice doing exactly its job. Printing
+    // those makes a healthy run look like it went wrong. Any other notice --
+    // the ones worth reading -- still gets through.
+    onnotice: (notice) => {
+      if (!notice.message.endsWith(', skipping')) console.warn(notice.message)
+    },
+  })
 
   try {
     // Which migrations this database has already seen. Without this, a second
