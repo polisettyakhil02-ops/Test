@@ -48,6 +48,15 @@ function recordingFetch(responder: (url: string, init: RequestInit) => Response)
 
 const CONFIG = { endpoint: 'https://receiver.test/hook', secret: 'sh-secret' }
 
+/**
+ * "Now", a moment ahead of the clock.
+ *
+ * Rows are inserted with `next_attempt_at DEFAULT now()`, so a pinned timestamp
+ * stops being due the moment the wall clock passes it -- a test written that
+ * way passes all morning and fails after lunch.
+ */
+const dueNow = () => new Date(Date.now() + 1000)
+
 describe('signing', () => {
   test('a receiver following the documented scheme accepts our signature', () => {
     const body = '{"id":"1"}'
@@ -116,7 +125,7 @@ describe('draining', () => {
     const row = await queue('invoice.posted', { documentId: 'abc', number: 'INV-00001' })
     const { impl, calls } = recordingFetch(() => new Response('', { status: 200 }))
 
-    const now = new Date('2026-08-17T10:00:00Z')
+    const now = dueNow()
     await drainOutbox(db, { ...CONFIG, fetchImpl: impl, now })
 
     const [call] = calls
@@ -138,7 +147,7 @@ describe('draining', () => {
     await queue('invoice.posted')
     const { impl } = recordingFetch(() => new Response('boom', { status: 500 }))
 
-    const now = new Date('2026-08-17T10:00:00Z')
+    const now = dueNow()
     const result = await drainOutbox(db, { ...CONFIG, fetchImpl: impl, now })
 
     assert.equal(result.failed, 1)
@@ -154,7 +163,7 @@ describe('draining', () => {
     await queue('invoice.posted')
     const { impl, calls } = recordingFetch(() => new Response('boom', { status: 500 }))
 
-    const now = new Date('2026-08-17T10:00:00Z')
+    const now = dueNow()
     await drainOutbox(db, { ...CONFIG, fetchImpl: impl, now })
 
     // Half a minute later: still inside the 60s backoff.
