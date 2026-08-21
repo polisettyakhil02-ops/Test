@@ -1,4 +1,4 @@
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { requireSession } from '@/lib/session'
 import { trialBalance } from '@/domain/reports'
 import { formatMoney } from '@/lib/dto'
@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic'
 
 export default async function TrialBalancePage() {
   const session = await requireSession()
-  const tb = await trialBalance(db, session.entityId)
+  const store = await getDb()
+  const tb = await trialBalance(store, session.entityId)
   const balanced = tb.totalDebitMinor === tb.totalCreditMinor
 
   return (

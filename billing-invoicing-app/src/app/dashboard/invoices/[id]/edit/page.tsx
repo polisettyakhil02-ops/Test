@@ -1,9 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
-import { eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { entities } from '@/db/schema'
+import { getDb } from '@/db'
 import { requireRole } from '@/lib/session'
 import { allItems, allParties, getDocument } from '@/lib/queries'
 import { InvoiceForm } from '@/app/dashboard/invoices/invoice-form'
@@ -22,10 +20,11 @@ export default async function EditInvoicePage(props: PageProps<'/dashboard/invoi
   // Posted documents are immutable; there is nothing to edit.
   if (found.doc.status !== 'draft') redirect(`/dashboard/invoices/${id}`)
 
-  const [parties, items, [org]] = await Promise.all([
+  const store = await getDb()
+  const [parties, items, org] = await Promise.all([
     allParties(session.entityId),
     allItems(session.entityId),
-    db.select().from(entities).where(eq(entities.id, session.entityId)).limit(1),
+    store.entities.findOne({ _id: session.entityId }),
   ])
 
   return (

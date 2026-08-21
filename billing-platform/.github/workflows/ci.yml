@@ -28,9 +28,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # No database service needed: the suite runs PostgreSQL in-process via
-      # PGlite, so the constraint triggers and deferred checks are the real
-      # ones rather than a mock's approximation of them.
+      # No database service needed: mongodb-memory-server downloads a real
+      # mongod and runs a single-node replica set in-process, so the document
+      # validators and the transactions are the real ones rather than a
+      # mock's approximation of them.
       - name: Test
         run: npm test
 

@@ -1,27 +1,18 @@
 import { test, describe, before } from 'node:test'
 import assert from 'node:assert/strict'
-import { and, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '@/db/testing'
-import {
-  accountingPeriods,
-  accounts,
-  auditLog,
-  documentLines,
-  documents,
-  journalEntries,
-  journalLines,
-  numberSeries,
-  outbox,
-  parties,
-} from '@/db/schema'
+import { withTransaction } from '@/db/client'
+import { newId } from '@/db/ids'
+import type { DocumentDoc, DocumentLine } from '@/db/collections'
 import { seedEntity } from '@/domain/seed'
 import {
   PostingError,
+  buildDocumentLines,
   fiscalYearOf,
   openBalanceMinor,
   postInvoice,
   postPayment,
-  replaceDocumentLines,
+  postJournalEntry,
   reverseDocument,
   takeNextNumber,
 } from '@/domain/posting'
@@ -32,37 +23,50 @@ let db: TestDb
 let entityId: string
 let partyId: string
 
-interface PgError {
-  code?: string
-  constraint?: string
-  message?: string
-}
-
-/**
- * Drizzle wraps driver errors as "Failed query: ...", so the useful detail --
- * the SQLSTATE and the constraint that actually fired -- lives on `cause`.
- * Asserting on those is far more precise than pattern-matching a message.
- */
-function pgErrorOf(error: unknown): PgError {
-  const cause = (error as { cause?: PgError })?.cause
-  return cause ?? (error as PgError)
-}
-
-/** Asserts the rejection came from a specific database constraint. */
-function rejectsWithConstraint(constraint: string) {
+/** Asserts the rejection is a MongoDB document-validator failure (code 121). */
+function rejectsValidation() {
   return (error: unknown) => {
-    const pg = pgErrorOf(error)
-    assert.equal(pg.constraint, constraint, `expected constraint ${constraint}, got ${pg.constraint}`)
+    const code = (error as { code?: number }).code
+    assert.equal(code, 121, `expected a document-validator rejection (121), got ${code}`)
     return true
   }
 }
 
-/** Asserts the rejection came from one of our PL/pgSQL guard triggers. */
-function rejectsWithMessage(pattern: RegExp) {
-  return (error: unknown) => {
-    const pg = pgErrorOf(error)
-    assert.match(String(pg.message ?? ''), pattern)
-    return true
+function blankDoc(overrides: Partial<DocumentDoc> & { lines: DocumentLine[] }): DocumentDoc {
+  return {
+    _id: newId(),
+    entityId,
+    docType: 'invoice',
+    docNumber: null,
+    status: 'draft',
+    partyId,
+    partySnapshot: { name: 'Globex', email: '', phone: '', gstin: '', stateCode: '29', address: '' },
+    issueDate: '2026-08-05',
+    dueDate: '2026-09-05',
+    currency: 'INR',
+    fxRate: '1',
+    subtotalMinor: 0,
+    discountMinor: 0,
+    taxMinor: 0,
+    totalMinor: 0,
+    allocatedMinor: 0,
+    discountType: 'fixed',
+    discountValue: '0',
+    supplyKind: 'intra_state',
+    placeOfSupply: '',
+    correctsDocumentId: null,
+    notes: '',
+    terms: '',
+    irn: null,
+    ackNo: null,
+    ackDate: null,
+    signedQrCode: null,
+    postedAt: null,
+    postedBy: null,
+    voidedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
   }
 }
 
@@ -83,146 +87,156 @@ async function makeDraft(options: {
     supplyKind: options.supplyKind ?? 'intra_state',
   })
 
-  const [doc] = await db
-    .insert(documents)
-    .values({
-      entityId,
-      docType: options.docType ?? 'invoice',
-      partyId,
-      partySnapshot: {
-        name: 'Globex',
-        email: '',
-        phone: '',
-        gstin: '',
-        stateCode: '29',
-        address: '',
-      },
-      issueDate: options.issueDate ?? '2026-08-05',
-      dueDate: options.dueDate === undefined ? '2026-09-05' : options.dueDate,
-      subtotalMinor: priced.subtotalMinor,
-      discountMinor: priced.discountMinor,
-      taxMinor: priced.taxMinor,
-      totalMinor: priced.totalMinor,
-      supplyKind: options.supplyKind ?? 'intra_state',
-      correctsDocumentId: options.correctsDocumentId ?? null,
-    })
-    .returning()
+  const doc = blankDoc({
+    docType: options.docType ?? 'invoice',
+    issueDate: options.issueDate ?? '2026-08-05',
+    dueDate: options.dueDate === undefined ? '2026-09-05' : options.dueDate,
+    subtotalMinor: priced.subtotalMinor,
+    discountMinor: priced.discountMinor,
+    taxMinor: priced.taxMinor,
+    totalMinor: priced.totalMinor,
+    supplyKind: options.supplyKind ?? 'intra_state',
+    correctsDocumentId: options.correctsDocumentId ?? null,
+    lines: buildDocumentLines(
+      options.lines.map((line, index) => ({
+        lineNo: index + 1,
+        description: line.description,
+        hsnSac: '',
+        unit: 'unit',
+        quantity: line.quantity,
+        unitPriceMinor: line.unitPriceMinor,
+        taxRatePercent: line.taxRatePercent,
+        ...priced.lines[index],
+      })),
+    ),
+  })
 
-  await replaceDocumentLines(
-    db,
-    doc.id,
-    options.lines.map((line, index) => ({
-      lineNo: index + 1,
-      description: line.description,
-      hsnSac: '',
-      unit: 'unit',
-      quantity: line.quantity,
-      unitPriceMinor: line.unitPriceMinor,
-      taxRatePercent: line.taxRatePercent,
-      ...priced.lines[index],
-    })),
-  )
-
+  await db.documents.insertOne(doc)
   return { doc, priced }
 }
 
 before(async () => {
   db = await createTestDb()
   const entity = await seedEntity(db, { name: 'Acme Consulting', stateCode: '29', startYear: 2026 })
-  entityId = entity.id
-  const [party] = await db
-    .insert(parties)
-    .values({ entityId, name: 'Globex', stateCode: '29' })
-    .returning()
-  partyId = party.id
+  entityId = entity._id
+  partyId = newId()
+  await db.parties.insertOne({
+    _id: partyId,
+    entityId,
+    name: 'Globex',
+    isCustomer: true,
+    isVendor: false,
+    email: '',
+    phone: '',
+    gstin: '',
+    stateCode: '29',
+    billingAddress: { line1: '', line2: '', city: '', state: '', postalCode: '', country: 'India' },
+    notes: '',
+    isActive: true,
+    createdAt: new Date(),
+  })
 })
 
-describe('ledger invariants (enforced by PostgreSQL, not by app code)', () => {
-  test('an unbalanced entry is refused at commit', async () => {
-    const [ar] = await db
-      .select()
-      .from(accounts)
-      .where(and(eq(accounts.entityId, entityId), eq(accounts.code, '1100')))
-    const [sales] = await db
-      .select()
-      .from(accounts)
-      .where(and(eq(accounts.entityId, entityId), eq(accounts.code, '4000')))
-    const [period] = await db
-      .select()
-      .from(accountingPeriods)
-      .where(eq(accountingPeriods.entityId, entityId))
-      .limit(1)
+describe('ledger invariants (enforced by a MongoDB document validator, not by app code)', () => {
+  test('an unbalanced entry is refused at insert', async () => {
+    const [ar] = await db.accounts.find({ entityId, code: '1100' }).toArray()
+    const [sales] = await db.accounts.find({ entityId, code: '4000' }).toArray()
+    const [period] = await db.accountingPeriods.find({ entityId }).limit(1).toArray()
 
     await assert.rejects(
-      db.transaction(async (tx) => {
-        const [entry] = await tx
-          .insert(journalEntries)
-          .values({
-            entityId,
-            periodId: period.id,
-            entryDate: '2026-04-05',
-            sourceType: 'test',
-          })
-          .returning()
-        await tx.insert(journalLines).values([
-          { entryId: entry.id, lineNo: 1, accountId: ar.id, debitMinor: 100_000 },
-          { entryId: entry.id, lineNo: 2, accountId: sales.id, creditMinor: 99_999 },
-        ])
-      }),
-      rejectsWithMessage(/is unbalanced: debits \d+, credits \d+/),
+      withTransaction(db, (tx) =>
+        postJournalEntry(tx, {
+          entityId,
+          periodId: period._id,
+          entryDate: '2026-04-05',
+          sourceType: 'test',
+          lines: [
+            { accountId: ar._id, debitMinor: 100_000 },
+            { accountId: sales._id, creditMinor: 99_999 },
+          ],
+        }),
+      ),
+      rejectsValidation(),
     )
   })
 
   test('a journal line cannot be both a debit and a credit', async () => {
-    const [ar] = await db
-      .select()
-      .from(accounts)
-      .where(and(eq(accounts.entityId, entityId), eq(accounts.code, '1100')))
-    const [period] = await db
-      .select()
-      .from(accountingPeriods)
-      .where(eq(accountingPeriods.entityId, entityId))
-      .limit(1)
+    const [ar] = await db.accounts.find({ entityId, code: '1100' }).toArray()
+    const [period] = await db.accountingPeriods.find({ entityId }).limit(1).toArray()
 
     await assert.rejects(
-      db.transaction(async (tx) => {
-        const [entry] = await tx
-          .insert(journalEntries)
-          .values({ entityId, periodId: period.id, entryDate: '2026-04-05', sourceType: 'test' })
-          .returning()
-        await tx.insert(journalLines).values({
-          entryId: entry.id,
-          lineNo: 1,
-          accountId: ar.id,
-          debitMinor: 500,
-          creditMinor: 500,
-        })
+      db.journalEntries.insertOne({
+        _id: newId(),
+        entityId,
+        periodId: period._id,
+        entryDate: '2026-04-05',
+        sourceType: 'test',
+        sourceId: null,
+        memo: '',
+        reversalOfId: null,
+        postedAt: new Date(),
+        postedBy: null,
+        lines: [{ lineNo: 1, accountId: ar._id, partyId: null, debitMinor: 500, creditMinor: 500, memo: '' }],
       }),
-      rejectsWithConstraint('journal_lines_one_sided'),
+      rejectsValidation(),
     )
   })
 
-  test('posted ledger rows cannot be updated or deleted', async () => {
+  test('an empty entry is refused', async () => {
+    const [period] = await db.accountingPeriods.find({ entityId }).limit(1).toArray()
+
+    await assert.rejects(
+      db.journalEntries.insertOne({
+        _id: newId(),
+        entityId,
+        periodId: period._id,
+        entryDate: '2026-04-05',
+        sourceType: 'test',
+        sourceId: null,
+        memo: '',
+        reversalOfId: null,
+        postedAt: new Date(),
+        postedBy: null,
+        lines: [],
+      }),
+      rejectsValidation(),
+    )
+  })
+
+  test('posted documents and journal entries cannot be edited through the domain layer', async () => {
     const { doc } = await makeDraft({
       lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 100_000, taxRatePercent: '18' }],
     })
-    await db.transaction(async (tx) => postInvoice(tx, doc.id))
+    await withTransaction(db, (tx) => postInvoice(tx, doc._id))
 
-    const [entry] = await db
-      .select()
-      .from(journalEntries)
-      .where(eq(journalEntries.sourceId, doc.id))
-      .limit(1)
-
+    // postInvoice on an already-posted document is the domain layer's own
+    // check refusing a second post -- there is no separate "edit" entry point
+    // to call instead, which is the point: the only door in is closed.
     await assert.rejects(
-      db.update(journalLines).set({ memo: 'tampered' }).where(eq(journalLines.entryId, entry.id)),
-      rejectsWithMessage(/append-only/i),
-    )
-    await assert.rejects(
-      db.delete(journalEntries).where(eq(journalEntries.id, entry.id)),
-      rejectsWithMessage(/append-only/i),
+      withTransaction(db, (tx) => postInvoice(tx, doc._id)),
+      (error: unknown) => error instanceof PostingError && error.code === 'not_draft',
     )
   })
+
+  test(
+    'unlike Postgres, MongoDB itself does not stop a write that skips the domain layer entirely',
+    async () => {
+      // This is the boundary of the guarantee, made explicit rather than
+      // assumed: a raw driver update -- one that does not go through
+      // domain/posting.ts at all -- can still edit a posted document, because
+      // no MongoDB validator can see what a document used to be, only what it
+      // is being written as. See the comment on postInvoice for what that
+      // means for a deployment that wants this closed off too.
+      const { doc } = await makeDraft({
+        lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 40_000, taxRatePercent: '18' }],
+      })
+      await withTransaction(db, (tx) => postInvoice(tx, doc._id))
+
+      await db.documents.updateOne({ _id: doc._id }, { $set: { notes: 'edited directly, bypassing posting.ts' } })
+      const reloaded = await db.documents.findOne({ _id: doc._id })
+      assert.equal(reloaded?.notes, 'edited directly, bypassing posting.ts')
+    },
+  )
 })
 
 describe('posting an invoice', () => {
@@ -235,32 +249,24 @@ describe('posting an invoice', () => {
     assert.equal(priced.taxMinor, 900_000)
     assert.equal(priced.totalMinor, 5_900_000)
 
-    const result = await db.transaction(async (tx) => postInvoice(tx, doc.id))
+    const result = await withTransaction(db, (tx) => postInvoice(tx, doc._id))
     assert.match(result.number, /^INV-\d{5}$/)
 
-    const [entry] = await db
-      .select()
-      .from(journalEntries)
-      .where(eq(journalEntries.sourceId, doc.id))
-      .limit(1)
+    const entry = await db.journalEntries.findOne({ sourceId: doc._id })
+    assert.ok(entry)
 
-    const lines = await db
-      .select({
-        code: accounts.code,
-        debit: journalLines.debitMinor,
-        credit: journalLines.creditMinor,
-      })
-      .from(journalLines)
-      .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
-      .where(eq(journalLines.entryId, entry.id))
+    const accounts = await db.accounts.find({ _id: { $in: entry.lines.map((l) => l.accountId) } }).toArray()
+    const codeOf = new Map(accounts.map((a) => [a._id, a.code]))
+    const byCode = Object.fromEntries(
+      entry.lines.map((l) => [codeOf.get(l.accountId), { debit: l.debitMinor, credit: l.creditMinor }]),
+    )
 
-    const byCode = Object.fromEntries(lines.map((l) => [l.code, l]))
     assert.equal(byCode['1100'].debit, 5_900_000)
     assert.equal(byCode['4000'].credit, 5_000_000)
     assert.equal(byCode['2200'].credit, 900_000)
 
-    const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
-    const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
+    const totalDebit = entry.lines.reduce((s, l) => s + l.debitMinor, 0)
+    const totalCredit = entry.lines.reduce((s, l) => s + l.creditMinor, 0)
     assert.equal(totalDebit, totalCredit)
   })
 
@@ -268,85 +274,55 @@ describe('posting an invoice', () => {
     const { doc } = await makeDraft({
       lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 10_000, taxRatePercent: '0' }],
     })
-    await db.transaction(async (tx) => postInvoice(tx, doc.id, { email: 'admin@acme.test' }))
+    await withTransaction(db, (tx) => postInvoice(tx, doc._id, { email: 'admin@acme.test' }))
 
-    const audits = await db
-      .select()
-      .from(auditLog)
-      .where(and(eq(auditLog.recordId, doc.id), eq(auditLog.action, 'post')))
+    const audits = await db.auditLog.find({ recordId: doc._id, action: 'post' }).toArray()
     assert.equal(audits.length, 1)
     assert.equal(audits[0].actorEmail, 'admin@acme.test')
 
-    const events = await db.select().from(outbox).where(eq(outbox.topic, 'invoice.posted'))
+    const events = await db.outbox.find({ topic: 'invoice.posted' }).toArray()
     assert.ok(events.length >= 1)
   })
 
-  test('a posted invoice cannot be edited or deleted', async () => {
+  test('a posted invoice refuses to post twice, through the same function everything else uses', async () => {
     const { doc } = await makeDraft({
       lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 25_000, taxRatePercent: '18' }],
     })
-    await db.transaction(async (tx) => postInvoice(tx, doc.id))
+    await withTransaction(db, (tx) => postInvoice(tx, doc._id))
 
     await assert.rejects(
-      db.update(documents).set({ totalMinor: 1 }).where(eq(documents.id, doc.id)),
-      rejectsWithMessage(/posted and cannot be edited/i),
-    )
-    await assert.rejects(
-      db.delete(documents).where(eq(documents.id, doc.id)),
-      rejectsWithMessage(/cannot be deleted/i),
-    )
-    await assert.rejects(
-      db.update(documentLines).set({ description: 'x' }).where(eq(documentLines.documentId, doc.id)),
-      rejectsWithMessage(/posted document/i),
+      withTransaction(db, (tx) => postInvoice(tx, doc._id)),
+      (error: unknown) => error instanceof PostingError && error.code === 'not_draft',
     )
   })
 
-  test('the e-invoice stamp is the one edit a posted invoice accepts', async () => {
+  test('the e-invoice stamp is the one edit a posted invoice accepts, and only through that one route', async () => {
     const { doc } = await makeDraft({
       lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 25_000, taxRatePercent: '18' }],
     })
-    await db.transaction(async (tx) => postInvoice(tx, doc.id))
+    await withTransaction(db, (tx) => postInvoice(tx, doc._id))
 
     const irn = 'a'.repeat(64)
-
-    await db
-      .update(documents)
-      .set({ irn, ackNo: '112410000123', ackDate: '2026-08-17 10:32:00', signedQrCode: 'eyJ.a.b' })
-      .where(eq(documents.id, doc.id))
-
-    const [stamped] = await db.select().from(documents).where(eq(documents.id, doc.id))
-    assert.equal(stamped.irn, irn)
-    assert.equal(stamped.status, 'posted')
-
-    // Write-once: an IRN is issued by the portal, not chosen by the seller.
-    await assert.rejects(
-      db.update(documents).set({ irn: 'b'.repeat(64) }).where(eq(documents.id, doc.id)),
-      rejectsWithMessage(/posted and cannot be edited/i),
+    // This mirrors exactly what POST /documents/:id/irn does: a direct, narrow
+    // update of only the e-invoice fields. It is the one write to a posted
+    // document the application condones, not something MongoDB enforces.
+    await db.documents.updateOne(
+      { _id: doc._id },
+      { $set: { irn, ackNo: '112410000123', ackDate: '2026-08-17 10:32:00', signedQrCode: 'eyJ.a.b' } },
     )
-  })
 
-  test('nothing else may ride along with the e-invoice stamp', async () => {
-    const { doc } = await makeDraft({
-      lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 25_000, taxRatePercent: '18' }],
-    })
-    await db.transaction(async (tx) => postInvoice(tx, doc.id))
-
-    await assert.rejects(
-      db
-        .update(documents)
-        .set({ irn: 'c'.repeat(64), notes: 'quietly changed after issue' })
-        .where(eq(documents.id, doc.id)),
-      rejectsWithMessage(/posted and cannot be edited/i),
-    )
+    const stamped = await db.documents.findOne({ _id: doc._id })
+    assert.equal(stamped?.irn, irn)
+    assert.equal(stamped?.status, 'posted')
   })
 
   test('posting twice is refused', async () => {
     const { doc } = await makeDraft({
       lines: [{ description: 'Work', quantity: '1', unitPriceMinor: 5_000, taxRatePercent: '0' }],
     })
-    await db.transaction(async (tx) => postInvoice(tx, doc.id))
+    await withTransaction(db, (tx) => postInvoice(tx, doc._id))
     await assert.rejects(
-      db.transaction(async (tx) => postInvoice(tx, doc.id)),
+      withTransaction(db, (tx) => postInvoice(tx, doc._id)),
       (error: unknown) => error instanceof PostingError && error.code === 'not_draft',
     )
   })
@@ -354,38 +330,27 @@ describe('posting an invoice', () => {
 
 describe('period control', () => {
   test('posting into a closed period is refused, and nothing is written', async () => {
-    const [period] = await db
-      .select()
-      .from(accountingPeriods)
-      .where(
-        and(
-          eq(accountingPeriods.entityId, entityId),
-          eq(accountingPeriods.startsOn, '2026-07-01'),
-        ),
-      )
-    await db
-      .update(accountingPeriods)
-      .set({ state: 'closed' })
-      .where(eq(accountingPeriods.id, period.id))
+    const period = await db.accountingPeriods.findOne({ entityId, startsOn: '2026-07-01' })
+    await db.accountingPeriods.updateOne({ _id: period!._id }, { $set: { state: 'closed' } })
 
     const { doc } = await makeDraft({
       lines: [{ description: 'July work', quantity: '1', unitPriceMinor: 90_000, taxRatePercent: '18' }],
       issueDate: '2026-07-15',
     })
 
-    const before = await db.select().from(journalEntries)
+    const before = await db.journalEntries.countDocuments({})
 
     await assert.rejects(
-      db.transaction(async (tx) => postInvoice(tx, doc.id)),
+      withTransaction(db, (tx) => postInvoice(tx, doc._id)),
       (error: unknown) => error instanceof PostingError && error.code === 'period_closed',
     )
 
-    const after = await db.select().from(journalEntries)
-    assert.equal(after.length, before.length, 'a refused posting must write nothing')
+    const after = await db.journalEntries.countDocuments({})
+    assert.equal(after, before, 'a refused posting must write nothing')
 
-    const [stillDraft] = await db.select().from(documents).where(eq(documents.id, doc.id))
-    assert.equal(stillDraft.status, 'draft')
-    assert.equal(stillDraft.docNumber, null)
+    const stillDraft = await db.documents.findOne({ _id: doc._id })
+    assert.equal(stillDraft?.status, 'draft')
+    assert.equal(stillDraft?.docNumber, null)
   })
 })
 
@@ -396,7 +361,7 @@ describe('document numbering', () => {
       const { doc } = await makeDraft({
         lines: [{ description: `Job ${i}`, quantity: '1', unitPriceMinor: 1_000, taxRatePercent: '0' }],
       })
-      const result = await db.transaction(async (tx) => postInvoice(tx, doc.id))
+      const result = await withTransaction(db, (tx) => postInvoice(tx, doc._id))
       numbers.push(result.number)
     }
 
@@ -408,44 +373,31 @@ describe('document numbering', () => {
 
   test('a rolled-back posting does not burn a number', async () => {
     const fy = fiscalYearOf('2026-08-05')
-    const [before] = await db
-      .select()
-      .from(numberSeries)
-      .where(and(eq(numberSeries.entityId, entityId), eq(numberSeries.docType, 'invoice')))
+    const before = await db.numberSeries.findOne({ entityId, docType: 'invoice' })
 
     await assert.rejects(
-      db.transaction(async (tx) => {
+      withTransaction(db, async (tx) => {
         await takeNextNumber(tx, entityId, 'invoice', fy)
         throw new Error('deliberate rollback')
       }),
       /deliberate rollback/,
     )
 
-    const [after] = await db
-      .select()
-      .from(numberSeries)
-      .where(and(eq(numberSeries.entityId, entityId), eq(numberSeries.docType, 'invoice')))
-
-    assert.equal(
-      Number(after.nextValue),
-      Number(before.nextValue),
-      'the sequence must not advance when the transaction rolls back',
-    )
+    const after = await db.numberSeries.findOne({ entityId, docType: 'invoice' })
+    assert.equal(after?.nextValue, before?.nextValue, 'the sequence must not advance when the transaction rolls back')
   })
 
   test('concurrent posting never issues the same number twice', async () => {
     const drafts = await Promise.all(
       Array.from({ length: 8 }, (_, i) =>
         makeDraft({
-          lines: [
-            { description: `Concurrent ${i}`, quantity: '1', unitPriceMinor: 2_000, taxRatePercent: '0' },
-          ],
+          lines: [{ description: `Concurrent ${i}`, quantity: '1', unitPriceMinor: 2_000, taxRatePercent: '0' }],
         }),
       ),
     )
 
     const results = await Promise.all(
-      drafts.map(({ doc }) => db.transaction(async (tx) => postInvoice(tx, doc.id))),
+      drafts.map(({ doc }) => withTransaction(db, (tx) => postInvoice(tx, doc._id))),
     )
 
     const numbers = results.map((r) => r.number)
@@ -524,7 +476,7 @@ describe('payments and receivables', () => {
       lines: [{ description: 'Big job', quantity: '1', unitPriceMinor: 1_000_000, taxRatePercent: '0' }],
       issueDate: '2026-08-10',
     })
-    await db.transaction(async (tx) => postInvoice(tx, invoice.id))
+    await withTransaction(db, (tx) => postInvoice(tx, invoice._id))
 
     const balanceBefore = await partyBalanceMinor(db, entityId, partyId)
 
@@ -534,11 +486,11 @@ describe('payments and receivables', () => {
       docType: 'payment',
     })
 
-    await db.transaction(async (tx) =>
-      postPayment(tx, payment.id, [{ documentId: invoice.id, amountMinor: 400_000 }]),
+    await withTransaction(db, (tx) =>
+      postPayment(tx, payment._id, [{ documentId: invoice._id, amountMinor: 400_000 }]),
     )
 
-    const open = await openBalanceMinor(db, invoice.id)
+    const open = await openBalanceMinor(db, invoice._id)
     assert.equal(open, 600_000)
 
     const balanceAfter = await partyBalanceMinor(db, entityId, partyId)
@@ -550,7 +502,7 @@ describe('payments and receivables', () => {
       lines: [{ description: 'Small job', quantity: '1', unitPriceMinor: 50_000, taxRatePercent: '0' }],
       issueDate: '2026-08-14',
     })
-    await db.transaction(async (tx) => postInvoice(tx, invoice.id))
+    await withTransaction(db, (tx) => postInvoice(tx, invoice._id))
 
     const { doc: payment } = await makeDraft({
       lines: [{ description: 'Overpay', quantity: '1', unitPriceMinor: 90_000, taxRatePercent: '0' }],
@@ -559,10 +511,56 @@ describe('payments and receivables', () => {
     })
 
     await assert.rejects(
-      db.transaction(async (tx) =>
-        postPayment(tx, payment.id, [{ documentId: invoice.id, amountMinor: 90_000 }]),
-      ),
-      rejectsWithMessage(/exceed document total/i),
+      withTransaction(db, (tx) => postPayment(tx, payment._id, [{ documentId: invoice._id, amountMinor: 90_000 }])),
+      (error: unknown) => error instanceof PostingError && error.code === 'unbalanced',
+    )
+
+    const reloaded = await db.documents.findOne({ _id: invoice._id })
+    assert.equal(reloaded?.allocatedMinor, 0, 'the rejected allocation must not have partially applied')
+  })
+
+  test('two concurrent payments cannot both settle the same invoice past its total', async () => {
+    const { doc: invoice } = await makeDraft({
+      lines: [{ description: 'Contested job', quantity: '1', unitPriceMinor: 100_000, taxRatePercent: '0' }],
+      issueDate: '2026-08-16',
+    })
+    await withTransaction(db, (tx) => postInvoice(tx, invoice._id))
+
+    const payA = await makeDraft({
+      lines: [{ description: 'Receipt A', quantity: '1', unitPriceMinor: 60_000, taxRatePercent: '0' }],
+      issueDate: '2026-08-17',
+      docType: 'payment',
+    })
+    const payB = await makeDraft({
+      lines: [{ description: 'Receipt B', quantity: '1', unitPriceMinor: 60_000, taxRatePercent: '0' }],
+      issueDate: '2026-08-17',
+      docType: 'payment',
+    })
+
+    const results = await Promise.allSettled([
+      withTransaction(db, (tx) => postPayment(tx, payA.doc._id, [{ documentId: invoice._id, amountMinor: 60_000 }])),
+      withTransaction(db, (tx) => postPayment(tx, payB.doc._id, [{ documentId: invoice._id, amountMinor: 60_000 }])),
+    ])
+
+    const settled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+    assert.equal(settled.length, 1, 'only one of the two ₹600 payments can fit inside a ₹1,000 invoice')
+    assert.equal(rejected.length, 1)
+
+    const reloaded = await db.documents.findOne({ _id: invoice._id })
+    assert.equal(reloaded?.allocatedMinor, 60_000)
+  })
+
+  test('the allocation bound holds even for a write that skips postPayment entirely', async () => {
+    const { doc: invoice } = await makeDraft({
+      lines: [{ description: 'Bound check', quantity: '1', unitPriceMinor: 10_000, taxRatePercent: '0' }],
+      issueDate: '2026-08-18',
+    })
+    await withTransaction(db, (tx) => postInvoice(tx, invoice._id))
+
+    await assert.rejects(
+      db.documents.updateOne({ _id: invoice._id }, { $set: { allocatedMinor: 10_001 } }),
+      rejectsValidation(),
     )
   })
 })
@@ -573,7 +571,7 @@ describe('corrections', () => {
       lines: [{ description: 'Job', quantity: '1', unitPriceMinor: 200_000, taxRatePercent: '18' }],
       issueDate: '2026-08-20',
     })
-    await db.transaction(async (tx) => postInvoice(tx, invoice.id))
+    await withTransaction(db, (tx) => postInvoice(tx, invoice._id))
 
     const revenueBefore = (await dashboardTotals(db, entityId, '2026-08-31')).revenueMinor
 
@@ -581,15 +579,15 @@ describe('corrections', () => {
       lines: [{ description: 'Job returned', quantity: '1', unitPriceMinor: 200_000, taxRatePercent: '18' }],
       issueDate: '2026-08-21',
       docType: 'credit_note',
-      correctsDocumentId: invoice.id,
+      correctsDocumentId: invoice._id,
     })
-    const result = await db.transaction(async (tx) => postInvoice(tx, credit.id))
+    const result = await withTransaction(db, (tx) => postInvoice(tx, credit._id))
     assert.match(result.number, /^CRN-/)
 
     const revenueAfter = (await dashboardTotals(db, entityId, '2026-08-31')).revenueMinor
     assert.equal(revenueAfter, revenueBefore - 200_000, 'revenue falls without a special case')
 
-    assert.equal(await openBalanceMinor(db, invoice.id), 0, 'the invoice is settled')
+    assert.equal(await openBalanceMinor(db, invoice._id), 0, 'the invoice is settled')
   })
 
   test('reversing a document leaves the original entry untouched', async () => {
@@ -597,28 +595,19 @@ describe('corrections', () => {
       lines: [{ description: 'Mistake', quantity: '1', unitPriceMinor: 77_000, taxRatePercent: '18' }],
       issueDate: '2026-08-25',
     })
-    await db.transaction(async (tx) => postInvoice(tx, doc.id))
+    await withTransaction(db, (tx) => postInvoice(tx, doc._id))
 
-    const [original] = await db
-      .select()
-      .from(journalEntries)
-      .where(and(eq(journalEntries.sourceId, doc.id), eq(journalEntries.sourceType, 'invoice')))
+    const original = await db.journalEntries.findOne({ sourceId: doc._id, sourceType: 'invoice' })
 
-    await db.transaction(async (tx) => reverseDocument(tx, doc.id))
+    await withTransaction(db, (tx) => reverseDocument(tx, doc._id))
 
-    const [stillThere] = await db
-      .select()
-      .from(journalEntries)
-      .where(eq(journalEntries.id, original.id))
+    const stillThere = await db.journalEntries.findOne({ _id: original!._id })
     assert.ok(stillThere, 'the original entry survives')
 
-    const [voided] = await db.select().from(documents).where(eq(documents.id, doc.id))
-    assert.equal(voided.status, 'voided')
+    const voided = await db.documents.findOne({ _id: doc._id })
+    assert.equal(voided?.status, 'voided')
 
-    const [reversal] = await db
-      .select()
-      .from(journalEntries)
-      .where(eq(journalEntries.reversalOfId, original.id))
+    const reversal = await db.journalEntries.findOne({ reversalOfId: original!._id })
     assert.ok(reversal, 'a reversing entry exists')
   })
 })
@@ -649,10 +638,6 @@ describe('reports derive from the ledger', () => {
     const ageing = await ageingReport(db, entityId, '2026-12-31')
     const openSum = ageing.reduce((sum, row) => sum + row.openMinor, 0)
 
-    assert.equal(
-      totals.receivableMinor,
-      openSum,
-      'the ledger AR balance and the open invoice list must agree',
-    )
+    assert.equal(totals.receivableMinor, openSum, 'the ledger AR balance and the open invoice list must agree')
   })
 })

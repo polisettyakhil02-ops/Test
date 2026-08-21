@@ -1,38 +1,41 @@
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { PGlite } from '@electric-sql/pglite'
-import { drizzle } from 'drizzle-orm/pglite'
-import * as schema from '@/db/schema'
+import { MongoMemoryReplSet } from 'mongodb-memory-server'
+import { MongoClient } from 'mongodb'
+import { ensureIndexes } from '@/db/indexes'
+import { makeStore, type Store } from '@/db/collections'
 
-export type TestDb = ReturnType<typeof drizzle<typeof schema>> & { $raw: PGlite }
-
-const MIGRATIONS_DIR = join(process.cwd(), 'src/db/migrations')
-const GUARDS_SQL = join(process.cwd(), 'src/db/ledger-guards.sql')
+export type TestDb = Store & { stop: () => Promise<void> }
 
 /**
- * A real PostgreSQL instance, in-process via WASM. Not a mock and not a
- * different engine -- the same constraint and trigger behaviour production
- * gets, which is the only way the ledger's invariants are actually tested.
+ * A real MongoDB instance, in-process. Not a mock and not a different engine —
+ * the same server, the same validators, the same transaction semantics
+ * production gets, which is the only way the ledger's invariants are actually
+ * tested.
+ *
+ * A single-node replica set rather than a standalone server: transactions do
+ * not exist on a standalone `mongod` at all, and this application posts
+ * everything through one, so a standalone instance could not run these tests
+ * to begin with.
+ *
+ * `mongodb-memory-server` downloads a real `mongod` binary the first time it
+ * runs and caches it — the same shape of thing PGlite did for Postgres, except
+ * the binary is fetched rather than bundled as WASM. That means the very first
+ * `npm test` on a machine needs a working connection to
+ * https://fastdl.mongodb.org; every run after that is instant.
  */
 export async function createTestDb(): Promise<TestDb> {
-  const client = new PGlite()
+  const replSet = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } })
+  const client = new MongoClient(replSet.getUri())
+  await client.connect()
 
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith('.sql'))
-    .sort()
+  const db = client.db('test')
+  await ensureIndexes(db)
 
-  for (const file of files) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8')
-    // drizzle-kit separates statements with this marker.
-    for (const statement of sql.split('--> statement-breakpoint')) {
-      const trimmed = statement.trim()
-      if (trimmed) await client.exec(trimmed)
-    }
+  const store = makeStore(db, client)
+  return {
+    ...store,
+    stop: async () => {
+      await client.close()
+      await replSet.stop()
+    },
   }
-
-  await client.exec(readFileSync(GUARDS_SQL, 'utf8'))
-
-  const db = drizzle(client, { schema }) as TestDb
-  db.$raw = client
-  return db
 }

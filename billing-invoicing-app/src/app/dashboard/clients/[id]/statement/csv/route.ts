@@ -1,4 +1,4 @@
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { requireSession } from '@/lib/session'
 import { getParty } from '@/lib/queries'
 import { customerStatement, statementToCsv } from '@/domain/statements'
@@ -25,7 +25,8 @@ export async function GET(
   const to = DATE.test(rawTo) ? rawTo : today()
   const from = DATE.test(rawFrom) ? rawFrom : oneYearBefore(to)
 
-  const statement = await customerStatement(db, session.entityId, id, { from, to })
+  const store = await getDb()
+  const statement = await customerStatement(store, session.entityId, id, { from, to })
   const csv = statementToCsv(statement, party.name)
 
   const slug = party.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')

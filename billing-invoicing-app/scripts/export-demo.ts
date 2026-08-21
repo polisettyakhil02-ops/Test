@@ -9,93 +9,101 @@
  */
 import { config as loadEnv } from 'dotenv'
 import { writeFileSync } from 'node:fs'
-import postgres from 'postgres'
+import { MongoClient } from 'mongodb'
+import { makeStore } from '@/db/collections'
 
 loadEnv({ path: ['.env.local', '.env'], quiet: true })
 
 const OUT = process.argv[2] || process.env.EXPORT_TO || '/tmp/demo-data.json'
 
-const iso = (v: unknown) =>
-  v instanceof Date ? v.toISOString().slice(0, 10) : v === null ? null : String(v)
-
-const stamp = (v: unknown) => (v instanceof Date ? v.toISOString() : v === null ? null : String(v))
+const stamp = (v: Date | null) => (v ? v.toISOString() : null)
 
 async function main() {
-  const sql = postgres(process.env.DATABASE_URL!, { max: 1 })
+  const uri = process.env.MONGODB_URI
+  if (!uri) throw new Error('Missing MONGODB_URI.')
 
-  const [entity] = await sql`SELECT * FROM entities LIMIT 1`
+  const client = new MongoClient(uri)
+  await client.connect()
+  const store = makeStore(client.db(), client)
 
-  const parties = await sql`SELECT * FROM parties ORDER BY name`
-  const items = await sql`SELECT * FROM items ORDER BY name`
-  const documents = await sql`SELECT * FROM documents ORDER BY issue_date, doc_number`
-  const lines = await sql`SELECT * FROM document_lines ORDER BY document_id, line_no`
-  const taxes = await sql`SELECT * FROM document_line_taxes`
-  const accounts = await sql`SELECT * FROM accounts ORDER BY code`
-  const entries = await sql`SELECT * FROM journal_entries ORDER BY entry_date, posted_at`
-  const jlines = await sql`SELECT * FROM journal_lines ORDER BY entry_id, line_no`
-  const allocations = await sql`SELECT * FROM allocations`
-  const outbox = await sql`SELECT * FROM outbox ORDER BY created_at DESC`
+  const entity = await store.entities.findOne({})
+  const parties = await store.parties.find({}).sort({ name: 1 }).toArray()
+  const items = await store.items.find({}).sort({ name: 1 }).toArray()
+  const documents = await store.documents.find({}).sort({ issueDate: 1, docNumber: 1 }).toArray()
+  const accounts = await store.accounts.find({}).sort({ code: 1 }).toArray()
+  const entries = await store.journalEntries.find({}).sort({ entryDate: 1, postedAt: 1 }).toArray()
+  const allocations = await store.allocations.find({}).toArray()
+  const outbox = await store.outbox.find({}).sort({ createdAt: -1 }).toArray()
+
+  // Lines and taxes are embedded on each document in this database, but the
+  // export keeps the same flat shape the Postgres version produced -- one
+  // array of lines, one of tax rows, each carrying the id of the document (or
+  // line) it belongs to -- so anything already written against that shape
+  // keeps working.
+  const lines = documents.flatMap((d) => d.lines.map((l) => ({ ...l, documentId: d._id })))
+  const taxes = lines.flatMap((l) => l.taxes.map((t) => ({ ...t, documentLineId: l._id })))
+  const journalLines = entries.flatMap((e) => e.lines.map((jl) => ({ ...jl, entryId: e._id })))
 
   const data = {
-    entity: {
+    entity: entity && {
       name: entity.name,
-      legalName: entity.legal_name,
+      legalName: entity.legalName,
       gstin: entity.gstin,
-      stateCode: entity.state_code,
-      addressLines: entity.address_lines,
+      stateCode: entity.stateCode,
+      addressLines: entity.addressLines,
       email: entity.email,
       phone: entity.phone,
-      bankDetails: entity.bank_details,
+      bankDetails: entity.bankDetails,
     },
     parties: parties.map((p) => ({
-      id: p.id, name: p.name, email: p.email, phone: p.phone, gstin: p.gstin,
-      stateCode: p.state_code, billingAddress: p.billing_address, notes: p.notes,
+      id: p._id, name: p.name, email: p.email, phone: p.phone, gstin: p.gstin,
+      stateCode: p.stateCode, billingAddress: p.billingAddress, notes: p.notes,
     })),
     items: items.map((i) => ({
-      id: i.id, name: i.name, description: i.description, hsnSac: i.hsn_sac,
-      unit: i.unit, unitPriceMinor: Number(i.unit_price_minor),
-      taxRatePercent: i.default_tax_rate_percent,
+      id: i._id, name: i.name, description: i.description, hsnSac: i.hsnSac,
+      unit: i.unit, unitPriceMinor: i.unitPriceMinor,
+      taxRatePercent: i.defaultTaxRatePercent,
     })),
     documents: documents.map((d) => ({
-      id: d.id, docType: d.doc_type, docNumber: d.doc_number, status: d.status,
-      partyId: d.party_id, partySnapshot: d.party_snapshot,
-      issueDate: iso(d.issue_date), dueDate: iso(d.due_date),
-      subtotalMinor: Number(d.subtotal_minor), discountMinor: Number(d.discount_minor),
-      taxMinor: Number(d.tax_minor), totalMinor: Number(d.total_minor),
-      supplyKind: d.supply_kind, placeOfSupply: d.place_of_supply,
-      notes: d.notes, terms: d.terms, correctsDocumentId: d.corrects_document_id,
-      irn: d.irn, ackNo: d.ack_no, ackDate: d.ack_date, signedQrCode: d.signed_qr_code,
-      postedAt: stamp(d.posted_at),
+      id: d._id, docType: d.docType, docNumber: d.docNumber, status: d.status,
+      partyId: d.partyId, partySnapshot: d.partySnapshot,
+      issueDate: d.issueDate, dueDate: d.dueDate,
+      subtotalMinor: d.subtotalMinor, discountMinor: d.discountMinor,
+      taxMinor: d.taxMinor, totalMinor: d.totalMinor, allocatedMinor: d.allocatedMinor,
+      supplyKind: d.supplyKind, placeOfSupply: d.placeOfSupply,
+      notes: d.notes, terms: d.terms, correctsDocumentId: d.correctsDocumentId,
+      irn: d.irn, ackNo: d.ackNo, ackDate: d.ackDate, signedQrCode: d.signedQrCode,
+      postedAt: stamp(d.postedAt),
     })),
     lines: lines.map((l) => ({
-      id: l.id, documentId: l.document_id, lineNo: l.line_no, description: l.description,
-      hsnSac: l.hsn_sac, unit: l.unit, quantity: l.quantity,
-      unitPriceMinor: Number(l.unit_price_minor), taxRatePercent: l.tax_rate_percent,
-      lineSubtotalMinor: Number(l.line_subtotal_minor),
-      lineDiscountMinor: Number(l.line_discount_minor),
-      lineTaxMinor: Number(l.line_tax_minor), lineTotalMinor: Number(l.line_total_minor),
+      id: l._id, documentId: l.documentId, lineNo: l.lineNo, description: l.description,
+      hsnSac: l.hsnSac, unit: l.unit, quantity: l.quantity,
+      unitPriceMinor: l.unitPriceMinor, taxRatePercent: l.taxRatePercent,
+      lineSubtotalMinor: l.lineSubtotalMinor,
+      lineDiscountMinor: l.lineDiscountMinor,
+      lineTaxMinor: l.lineTaxMinor, lineTotalMinor: l.lineTotalMinor,
     })),
     taxes: taxes.map((t) => ({
-      documentLineId: t.document_line_id, component: t.component,
-      ratePercent: t.rate_percent, taxableMinor: Number(t.taxable_minor),
-      amountMinor: Number(t.amount_minor),
+      documentLineId: t.documentLineId, component: t.component,
+      ratePercent: t.ratePercent, taxableMinor: t.taxableMinor,
+      amountMinor: t.amountMinor,
     })),
-    accounts: accounts.map((a) => ({ id: a.id, code: a.code, name: a.name, type: a.type })),
+    accounts: accounts.map((a) => ({ id: a._id, code: a.code, name: a.name, type: a.type })),
     entries: entries.map((e) => ({
-      id: e.id, entryDate: iso(e.entry_date), memo: e.memo,
-      sourceType: e.source_type, sourceId: e.source_id, postedAt: stamp(e.posted_at),
+      id: e._id, entryDate: e.entryDate, memo: e.memo,
+      sourceType: e.sourceType, sourceId: e.sourceId, postedAt: stamp(e.postedAt),
     })),
-    journalLines: jlines.map((l) => ({
-      entryId: l.entry_id, lineNo: l.line_no, accountId: l.account_id, partyId: l.party_id,
-      debitMinor: Number(l.debit_minor), creditMinor: Number(l.credit_minor), memo: l.memo,
+    journalLines: journalLines.map((l) => ({
+      entryId: l.entryId, lineNo: l.lineNo, accountId: l.accountId, partyId: l.partyId,
+      debitMinor: l.debitMinor, creditMinor: l.creditMinor, memo: l.memo,
     })),
     allocations: allocations.map((a) => ({
-      fromDocumentId: a.from_document_id, toDocumentId: a.to_document_id,
-      amountMinor: Number(a.amount_minor),
+      fromDocumentId: a.fromDocumentId, toDocumentId: a.toDocumentId,
+      amountMinor: a.amountMinor,
     })),
     outbox: outbox.map((o) => ({
-      id: o.id, topic: o.topic, payload: o.payload, createdAt: stamp(o.created_at),
-      deliveredAt: stamp(o.delivered_at), attempts: o.attempts, lastError: o.last_error,
+      id: o._id, topic: o.topic, payload: o.payload, createdAt: stamp(o.createdAt),
+      deliveredAt: stamp(o.deliveredAt), attempts: o.attempts, lastError: o.lastError,
     })),
   }
 
@@ -108,7 +116,7 @@ async function main() {
       `allocations ${data.allocations.length} · outbox ${data.outbox.length}`,
   )
 
-  await sql.end({ timeout: 5 })
+  await client.close()
 }
 
 main()

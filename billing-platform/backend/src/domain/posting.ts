@@ -1,22 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm'
-import {
-  accountingPeriods,
-  accounts,
-  allocations,
-  auditLog,
-  documentLineTaxes,
-  documentLines,
-  documents,
-  journalEntries,
-  journalLines,
-  numberSeries,
-  outbox,
-} from '@/db/schema'
+import { newId } from '@/db/ids'
+import type { DocumentDoc, DocumentLine, JournalLine, Store } from '@/db/collections'
 import type { Minor } from '@/domain/money'
-
-/** Anything with the drizzle query surface — the real db or a transaction. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type Db = any
 
 export class PostingError extends Error {
   constructor(
@@ -43,63 +27,46 @@ export const ACCOUNT_CODES = {
 } as const
 
 /**
- * Allocates the next document number, under a row lock.
+ * Allocates the next document number, without a row lock — MongoDB has none.
  *
- * `FOR UPDATE` serialises concurrent posters on this one row, so two invoices
- * committed at the same instant cannot take the same number. Because it runs
- * inside the caller's transaction, a rollback also returns the number rather
- * than burning it — a gap in an invoice sequence is something a tax authority
- * expects you to explain.
+ * `findOneAndUpdate` incrementing `nextValue` is atomic on that one document:
+ * two transactions racing for the same number-series row cannot both succeed.
+ * One of them hits a write conflict, MongoDB aborts it with a
+ * `TransientTransactionError`, and `withTransaction` (db/client.ts) retries the
+ * whole callback from the top — which is exactly the Mongo-native replacement
+ * for `SELECT ... FOR UPDATE`: the loser blocks-by-retrying instead of
+ * blocking-by-waiting. Because the increment happens inside the caller's
+ * transaction, an abort also rolls the counter back, so a rolled-back posting
+ * does not burn a number.
  */
 export async function takeNextNumber(
-  tx: Db,
+  store: Store,
   entityId: string,
   docType: 'invoice' | 'credit_note' | 'payment',
   fiscalYear: string,
 ): Promise<string> {
-  const locked = await tx.execute(sql`
-    SELECT id, prefix, padding, next_value
-      FROM ${numberSeries}
-     WHERE entity_id = ${entityId}
-       AND doc_type = ${docType}
-       AND fiscal_year = ${fiscalYear}
-     FOR UPDATE
-  `)
+  const before = await store.numberSeries.findOneAndUpdate(
+    { entityId, docType, fiscalYear },
+    { $inc: { nextValue: 1 } },
+    { session: store.session, returnDocument: 'before' },
+  )
 
-  const row = (locked.rows ?? locked)[0] as
-    | { id: string; prefix: string; padding: number; next_value: string | number }
-    | undefined
-
-  if (!row) {
+  if (!before) {
     throw new PostingError(
       `No ${docType} number series for ${fiscalYear}. Create one before posting.`,
       'no_period',
     )
   }
 
-  const value = Number(row.next_value)
-
-  await tx
-    .update(numberSeries)
-    .set({ nextValue: value + 1 })
-    .where(eq(numberSeries.id, row.id))
-
-  return `${row.prefix}${String(value).padStart(row.padding, '0')}`
+  return `${before.prefix}${String(before.nextValue).padStart(before.padding, '0')}`
 }
 
 /** The open period containing `date`, or an explanatory failure. */
-export async function requireOpenPeriod(tx: Db, entityId: string, date: string) {
-  const [period] = await tx
-    .select()
-    .from(accountingPeriods)
-    .where(
-      and(
-        eq(accountingPeriods.entityId, entityId),
-        sql`${accountingPeriods.startsOn} <= ${date}`,
-        sql`${accountingPeriods.endsOn} >= ${date}`,
-      ),
-    )
-    .limit(1)
+export async function requireOpenPeriod(store: Store, entityId: string, date: string) {
+  const period = await store.accountingPeriods.findOne(
+    { entityId, startsOn: { $lte: date }, endsOn: { $gte: date } },
+    { session: store.session },
+  )
 
   if (!period) {
     throw new PostingError(
@@ -118,12 +85,8 @@ export async function requireOpenPeriod(tx: Db, entityId: string, date: string) 
   return period
 }
 
-async function accountByCode(tx: Db, entityId: string, code: string) {
-  const [account] = await tx
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.entityId, entityId), eq(accounts.code, code)))
-    .limit(1)
+async function accountByCode(store: Store, entityId: string, code: string) {
+  const account = await store.accounts.findOne({ entityId, code }, { session: store.session })
 
   if (!account) {
     throw new PostingError(`Chart of accounts is missing account ${code}.`, 'account_missing')
@@ -145,12 +108,14 @@ export interface JournalLineInput {
 /**
  * Writes one balanced journal entry.
  *
- * The balance check is not performed here — it is a deferred constraint trigger
- * in the database, so it holds for every writer, including a psql session. This
- * function only assembles the lines.
+ * The balance check is not performed here in application code — it is a
+ * MongoDB document validator on the `journal_entries` collection (see
+ * db/indexes.ts), evaluated against this one document's embedded lines at
+ * insert time. It holds for every writer, including a driver session that
+ * skips this function entirely. This function only assembles the lines.
  */
 export async function postJournalEntry(
-  tx: Db,
+  store: Store,
   input: {
     entityId: string
     periodId: string
@@ -170,36 +135,35 @@ export async function postJournalEntry(
     throw new PostingError('A journal entry needs at least one line with a value.', 'unbalanced')
   }
 
-  const [entry] = await tx
-    .insert(journalEntries)
-    .values({
-      entityId: input.entityId,
-      periodId: input.periodId,
-      entryDate: input.entryDate,
-      sourceType: input.sourceType,
-      sourceId: input.sourceId ?? null,
-      memo: input.memo ?? '',
-      postedBy: input.postedBy ?? null,
-    })
-    .returning()
+  const lines: JournalLine[] = meaningful.map((line, index) => ({
+    lineNo: index + 1,
+    accountId: line.accountId,
+    partyId: line.partyId ?? null,
+    debitMinor: line.debitMinor ?? 0,
+    creditMinor: line.creditMinor ?? 0,
+    memo: line.memo ?? '',
+  }))
 
-  await tx.insert(journalLines).values(
-    meaningful.map((line, index) => ({
-      entryId: entry.id,
-      lineNo: index + 1,
-      accountId: line.accountId,
-      partyId: line.partyId ?? null,
-      debitMinor: line.debitMinor ?? 0,
-      creditMinor: line.creditMinor ?? 0,
-      memo: line.memo ?? '',
-    })),
-  )
+  const entry = {
+    _id: newId(),
+    entityId: input.entityId,
+    periodId: input.periodId,
+    entryDate: input.entryDate,
+    sourceType: input.sourceType,
+    sourceId: input.sourceId ?? null,
+    memo: input.memo ?? '',
+    reversalOfId: null,
+    postedAt: new Date(),
+    postedBy: input.postedBy ?? null,
+    lines,
+  }
 
+  await store.journalEntries.insertOne(entry, { session: store.session })
   return entry
 }
 
 export async function recordAudit(
-  tx: Db,
+  store: Store,
   input: {
     entityId?: string | null
     actorId?: string | null
@@ -211,16 +175,21 @@ export async function recordAudit(
     after?: unknown
   },
 ) {
-  await tx.insert(auditLog).values({
-    entityId: input.entityId ?? null,
-    actorId: input.actorId ?? null,
-    actorEmail: input.actorEmail ?? '',
-    action: input.action,
-    recordType: input.recordType,
-    recordId: input.recordId ?? null,
-    before: input.before ?? null,
-    after: input.after ?? null,
-  })
+  await store.auditLog.insertOne(
+    {
+      _id: newId(),
+      entityId: input.entityId ?? null,
+      actorId: input.actorId ?? null,
+      actorEmail: input.actorEmail ?? '',
+      action: input.action,
+      recordType: input.recordType,
+      recordId: input.recordId ?? null,
+      before: input.before ?? null,
+      after: input.after ?? null,
+      at: new Date(),
+    },
+    { session: store.session },
+  )
 }
 
 /** Indian fiscal year for a date: 2026-08-01 -> "2026-27". */
@@ -230,55 +199,56 @@ export function fiscalYearOf(date: string): string {
   return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`
 }
 
+async function requireDraft(store: Store, documentId: string): Promise<DocumentDoc> {
+  const doc = await store.documents.findOne({ _id: documentId }, { session: store.session })
+  if (!doc) throw new PostingError('That document no longer exists.', 'not_draft')
+  if (doc.status !== 'draft') {
+    throw new PostingError(`${doc.docNumber ?? 'This document'} is already ${doc.status}.`, 'not_draft')
+  }
+  return doc
+}
+
 /**
  * Posts a draft invoice: takes a number, checks the period, writes the ledger
  * entry and queues the outbound event — all inside the caller's transaction.
  *
  * Dr Accounts Receivable / Cr Sales / Cr GST Output.
+ *
+ * This function, `postPayment` and `reverseDocument` below are the *only*
+ * permitted way to change a posted document's status or write to
+ * `journal_entries`. MongoDB has no trigger that can refuse an update based on
+ * what a document's previous state was — a validator only ever sees the write
+ * being made, never the one it replaces — so unlike the Postgres version,
+ * nothing in the storage layer stops a driver session that bypasses this
+ * module from editing a posted document directly. The guarantee is enforced
+ * here, in the one code path every route goes through, and its boundary is
+ * tested explicitly in test/ledger.test.ts rather than assumed.
  */
 export async function postInvoice(
-  tx: Db,
+  store: Store,
   documentId: string,
   actor: { id?: string | null; email?: string } = {},
 ) {
-  const [doc] = await tx.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  const doc = await requireDraft(store, documentId)
 
-  if (!doc) throw new PostingError('That document no longer exists.', 'not_draft')
-  if (doc.status !== 'draft') {
-    throw new PostingError(
-      `${doc.docNumber ?? 'This document'} is already ${doc.status}.`,
-      'not_draft',
-    )
-  }
-
-  const lines = await tx
-    .select()
-    .from(documentLines)
-    .where(eq(documentLines.documentId, documentId))
-
-  if (lines.length === 0) {
+  if (doc.lines.length === 0) {
     throw new PostingError('An invoice needs at least one line.', 'no_lines')
   }
 
-  const period = await requireOpenPeriod(tx, doc.entityId, doc.issueDate)
-  const number = await takeNextNumber(
-    tx,
-    doc.entityId,
-    doc.docType,
-    fiscalYearOf(doc.issueDate),
-  )
+  const period = await requireOpenPeriod(store, doc.entityId, doc.issueDate)
+  const number = await takeNextNumber(store, doc.entityId, doc.docType, fiscalYearOf(doc.issueDate))
 
-  const receivable = await accountByCode(tx, doc.entityId, ACCOUNT_CODES.receivable)
-  const gstOutput = await accountByCode(tx, doc.entityId, ACCOUNT_CODES.gstOutput)
-  const defaultSales = await accountByCode(tx, doc.entityId, ACCOUNT_CODES.sales)
+  const receivable = await accountByCode(store, doc.entityId, ACCOUNT_CODES.receivable)
+  const gstOutput = await accountByCode(store, doc.entityId, ACCOUNT_CODES.gstOutput)
+  const defaultSales = await accountByCode(store, doc.entityId, ACCOUNT_CODES.sales)
 
   const isCredit = doc.docType === 'credit_note'
 
   // Income is credited per line so a P&L can break down by account; the
   // receivable is a single line for the whole document.
   const incomeByAccount = new Map<string, Minor>()
-  for (const line of lines) {
-    const accountId = line.incomeAccountId ?? defaultSales.id
+  for (const line of doc.lines) {
+    const accountId = line.incomeAccountId ?? defaultSales._id
     const net = line.lineSubtotalMinor - line.lineDiscountMinor
     incomeByAccount.set(accountId, (incomeByAccount.get(accountId) ?? 0) + net)
   }
@@ -290,258 +260,290 @@ export async function postInvoice(
       journal.push({ accountId, debitMinor: amount, memo: 'Sales returned' })
     }
     if (doc.taxMinor > 0) {
-      journal.push({ accountId: gstOutput.id, debitMinor: doc.taxMinor, memo: 'GST reversed' })
+      journal.push({ accountId: gstOutput._id, debitMinor: doc.taxMinor, memo: 'GST reversed' })
     }
-    journal.push({
-      accountId: receivable.id,
-      partyId: doc.partyId,
-      creditMinor: doc.totalMinor,
-    })
+    journal.push({ accountId: receivable._id, partyId: doc.partyId, creditMinor: doc.totalMinor })
   } else {
-    journal.push({
-      accountId: receivable.id,
-      partyId: doc.partyId,
-      debitMinor: doc.totalMinor,
-    })
+    journal.push({ accountId: receivable._id, partyId: doc.partyId, debitMinor: doc.totalMinor })
     for (const [accountId, amount] of incomeByAccount) {
       journal.push({ accountId, creditMinor: amount })
     }
     if (doc.taxMinor > 0) {
-      journal.push({ accountId: gstOutput.id, creditMinor: doc.taxMinor, memo: 'GST payable' })
+      journal.push({ accountId: gstOutput._id, creditMinor: doc.taxMinor, memo: 'GST payable' })
     }
   }
 
-  const entry = await postJournalEntry(tx, {
+  const entry = await postJournalEntry(store, {
     entityId: doc.entityId,
-    periodId: period.id,
+    periodId: period._id,
     entryDate: doc.issueDate,
     sourceType: doc.docType,
-    sourceId: doc.id,
+    sourceId: doc._id,
     memo: `${isCredit ? 'Credit note' : 'Invoice'} ${number}`,
     postedBy: actor.id ?? null,
     lines: journal,
   })
 
-  await tx
-    .update(documents)
-    .set({
-      status: 'posted',
-      docNumber: number,
-      postedAt: new Date(),
-      postedBy: actor.id ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(documents.id, documentId))
+  await store.documents.updateOne(
+    { _id: documentId },
+    {
+      $set: {
+        status: 'posted',
+        docNumber: number,
+        postedAt: new Date(),
+        postedBy: actor.id ?? null,
+        updatedAt: new Date(),
+      },
+    },
+    { session: store.session },
+  )
 
   // A credit note settles the invoice it corrects, up to what is still open.
   if (isCredit && doc.correctsDocumentId) {
-    const open = await openBalanceMinor(tx, doc.correctsDocumentId)
+    const open = await openBalanceMinor(store, doc.correctsDocumentId)
     const amount = Math.min(open, doc.totalMinor)
     if (amount > 0) {
-      await tx.insert(allocations).values({
-        entityId: doc.entityId,
-        fromDocumentId: doc.id,
-        toDocumentId: doc.correctsDocumentId,
-        amountMinor: amount,
-      })
+      await allocateAmount(store, doc.entityId, doc._id, doc.correctsDocumentId, amount)
     }
   }
 
-  await recordAudit(tx, {
+  await recordAudit(store, {
     entityId: doc.entityId,
     actorId: actor.id,
     actorEmail: actor.email,
     action: 'post',
     recordType: 'document',
-    recordId: doc.id,
+    recordId: doc._id,
     before: { status: 'draft', docNumber: null },
-    after: { status: 'posted', docNumber: number, journalEntryId: entry.id },
+    after: { status: 'posted', docNumber: number, journalEntryId: entry._id },
   })
 
   // Inside the transaction on purpose: a rollback must not leave a webhook
   // already delivered, and a commit must not fail to notify.
-  await tx.insert(outbox).values({
-    topic: isCredit ? 'credit_note.posted' : 'invoice.posted',
-    payload: { documentId: doc.id, number, totalMinor: doc.totalMinor },
-  })
+  await store.outbox.insertOne(
+    {
+      _id: newId(),
+      topic: isCredit ? 'credit_note.posted' : 'invoice.posted',
+      payload: { documentId: doc._id, number, totalMinor: doc.totalMinor },
+      createdAt: new Date(),
+      deliveredAt: null,
+      attempts: 0,
+      nextAttemptAt: new Date(),
+      lastError: '',
+    },
+    { session: store.session },
+  )
 
-  return { number, journalEntryId: entry.id }
+  return { number, journalEntryId: entry._id }
 }
 
 /** How much of a document is still unsettled. */
-export async function openBalanceMinor(tx: Db, documentId: string): Promise<Minor> {
-  const [doc] = await tx
-    .select({ total: documents.totalMinor })
-    .from(documents)
-    .where(eq(documents.id, documentId))
-    .limit(1)
-
+export async function openBalanceMinor(store: Store, documentId: string): Promise<Minor> {
+  const doc = await store.documents.findOne(
+    { _id: documentId },
+    { session: store.session, projection: { totalMinor: 1, allocatedMinor: 1 } },
+  )
   if (!doc) return 0
+  return doc.totalMinor - doc.allocatedMinor
+}
 
-  const [row] = await tx
-    .select({ allocated: sql<string>`COALESCE(SUM(${allocations.amountMinor}), 0)` })
-    .from(allocations)
-    .where(eq(allocations.toDocumentId, documentId))
+/**
+ * Applies a payment or credit note against an invoice, and records the
+ * allocation.
+ *
+ * `documents.allocatedMinor` is a running total kept on the invoice itself
+ * rather than always summed fresh from `allocations` — that denormalisation is
+ * what lets "never allocate more than the total" be a MongoDB document
+ * validator again (db/indexes.ts), the same way embedding lines is what let
+ * the balance check be one. The increment and the bound are the same atomic
+ * operation: `findOneAndUpdate` with a `$expr` filter checks the new total
+ * against `totalMinor` and applies the `$inc` only if it holds, all in one
+ * round trip no other write can land in the middle of. Two concurrent
+ * payments racing to settle the same invoice cannot both win — exactly what
+ * Postgres's `assert_allocation_within_total` deferred trigger existed to
+ * prevent, just enforced as one document's own arithmetic instead of a
+ * SUM over a second table.
+ */
+async function allocateAmount(
+  store: Store,
+  entityId: string,
+  fromDocumentId: string,
+  toDocumentId: string,
+  amountMinor: Minor,
+): Promise<void> {
+  const updated = await store.documents.findOneAndUpdate(
+    {
+      _id: toDocumentId,
+      $expr: { $lte: [{ $add: ['$allocatedMinor', amountMinor] }, '$totalMinor'] },
+    },
+    { $inc: { allocatedMinor: amountMinor } },
+    { session: store.session },
+  )
 
-  return doc.total - Number(row?.allocated ?? 0)
+  if (!updated) {
+    throw new PostingError('Allocated amount would exceed the document total.', 'unbalanced')
+  }
+
+  await store.allocations.insertOne(
+    {
+      _id: newId(),
+      entityId,
+      fromDocumentId,
+      toDocumentId,
+      amountMinor,
+      allocatedAt: new Date(),
+    },
+    { session: store.session },
+  )
 }
 
 /**
  * Posts a payment and allocates it across invoices.
  *
- * Dr Bank / Cr Accounts Receivable. The customer's balance is never a column
+ * Dr Bank / Cr Accounts Receivable. The customer's balance is never a field
  * anywhere — it is the sum of their AR lines, so it cannot disagree with the
  * books.
  */
 export async function postPayment(
-  tx: Db,
+  store: Store,
   documentId: string,
   targets: Array<{ documentId: string; amountMinor: Minor }>,
   actor: { id?: string | null; email?: string } = {},
 ) {
-  const [doc] = await tx.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  const doc = await requireDraft(store, documentId)
 
-  if (!doc) throw new PostingError('That payment no longer exists.', 'not_draft')
-  if (doc.status !== 'draft') {
-    throw new PostingError('That payment has already been posted.', 'not_draft')
-  }
+  const period = await requireOpenPeriod(store, doc.entityId, doc.issueDate)
+  const number = await takeNextNumber(store, doc.entityId, 'payment', fiscalYearOf(doc.issueDate))
 
-  const period = await requireOpenPeriod(tx, doc.entityId, doc.issueDate)
-  const number = await takeNextNumber(tx, doc.entityId, 'payment', fiscalYearOf(doc.issueDate))
+  const bank = await accountByCode(store, doc.entityId, ACCOUNT_CODES.bank)
+  const receivable = await accountByCode(store, doc.entityId, ACCOUNT_CODES.receivable)
 
-  const bank = await accountByCode(tx, doc.entityId, ACCOUNT_CODES.bank)
-  const receivable = await accountByCode(tx, doc.entityId, ACCOUNT_CODES.receivable)
-
-  const entry = await postJournalEntry(tx, {
+  const entry = await postJournalEntry(store, {
     entityId: doc.entityId,
-    periodId: period.id,
+    periodId: period._id,
     entryDate: doc.issueDate,
     sourceType: 'payment',
-    sourceId: doc.id,
+    sourceId: doc._id,
     memo: `Payment ${number}`,
     postedBy: actor.id ?? null,
     lines: [
-      { accountId: bank.id, debitMinor: doc.totalMinor },
-      { accountId: receivable.id, partyId: doc.partyId, creditMinor: doc.totalMinor },
+      { accountId: bank._id, debitMinor: doc.totalMinor },
+      { accountId: receivable._id, partyId: doc.partyId, creditMinor: doc.totalMinor },
     ],
   })
 
   for (const target of targets) {
     if (target.amountMinor <= 0) continue
-    await tx.insert(allocations).values({
-      entityId: doc.entityId,
-      fromDocumentId: doc.id,
-      toDocumentId: target.documentId,
-      amountMinor: target.amountMinor,
-    })
+    await allocateAmount(store, doc.entityId, doc._id, target.documentId, target.amountMinor)
   }
 
-  await tx
-    .update(documents)
-    .set({
-      status: 'posted',
-      docNumber: number,
-      postedAt: new Date(),
-      postedBy: actor.id ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(documents.id, documentId))
+  await store.documents.updateOne(
+    { _id: documentId },
+    {
+      $set: {
+        status: 'posted',
+        docNumber: number,
+        postedAt: new Date(),
+        postedBy: actor.id ?? null,
+        updatedAt: new Date(),
+      },
+    },
+    { session: store.session },
+  )
 
-  await recordAudit(tx, {
+  await recordAudit(store, {
     entityId: doc.entityId,
     actorId: actor.id,
     actorEmail: actor.email,
     action: 'post',
     recordType: 'payment',
-    recordId: doc.id,
-    after: { number, journalEntryId: entry.id },
+    recordId: doc._id,
+    after: { number, journalEntryId: entry._id },
   })
 
-  await tx.insert(outbox).values({
-    topic: 'payment.posted',
-    payload: { documentId: doc.id, number, totalMinor: doc.totalMinor },
-  })
+  await store.outbox.insertOne(
+    {
+      _id: newId(),
+      topic: 'payment.posted',
+      payload: { documentId: doc._id, number, totalMinor: doc.totalMinor },
+      createdAt: new Date(),
+      deliveredAt: null,
+      attempts: 0,
+      nextAttemptAt: new Date(),
+      lastError: '',
+    },
+    { session: store.session },
+  )
 
-  return { number, journalEntryId: entry.id }
+  return { number, journalEntryId: entry._id }
 }
 
 /** Reverses a posted document with a fresh, opposite entry. */
 export async function reverseDocument(
-  tx: Db,
+  store: Store,
   documentId: string,
   actor: { id?: string | null; email?: string } = {},
 ) {
-  const [doc] = await tx.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  const doc = await store.documents.findOne({ _id: documentId }, { session: store.session })
   if (!doc) throw new PostingError('That document no longer exists.', 'not_draft')
   if (doc.status !== 'posted') {
     throw new PostingError('Only a posted document can be reversed.', 'not_draft')
   }
 
-  const [original] = await tx
-    .select()
-    .from(journalEntries)
-    .where(and(eq(journalEntries.sourceType, doc.docType), eq(journalEntries.sourceId, doc.id)))
-    .limit(1)
-
+  const original = await store.journalEntries.findOne(
+    { sourceType: doc.docType, sourceId: doc._id },
+    { session: store.session },
+  )
   if (!original) throw new PostingError('No ledger entry found for that document.', 'unbalanced')
 
-  const originalLines = await tx
-    .select()
-    .from(journalLines)
-    .where(eq(journalLines.entryId, original.id))
+  const period = await requireOpenPeriod(store, doc.entityId, doc.issueDate)
 
-  const period = await requireOpenPeriod(tx, doc.entityId, doc.issueDate)
-
-  const [reversal] = await tx
-    .insert(journalEntries)
-    .values({
-      entityId: doc.entityId,
-      periodId: period.id,
-      entryDate: doc.issueDate,
-      sourceType: `${doc.docType}_reversal`,
-      sourceId: doc.id,
-      memo: `Reversal of ${doc.docNumber}`,
-      reversalOfId: original.id,
-      postedBy: actor.id ?? null,
-    })
-    .returning()
-
-  await tx.insert(journalLines).values(
-    originalLines.map((line: typeof journalLines.$inferSelect, index: number) => ({
-      entryId: reversal.id,
+  const reversal = {
+    _id: newId(),
+    entityId: doc.entityId,
+    periodId: period._id,
+    entryDate: doc.issueDate,
+    sourceType: `${doc.docType}_reversal`,
+    sourceId: doc._id,
+    memo: `Reversal of ${doc.docNumber}`,
+    reversalOfId: original._id,
+    postedAt: new Date(),
+    postedBy: actor.id ?? null,
+    // Swap the sides. The original entry is left exactly as it was.
+    lines: original.lines.map((line, index) => ({
       lineNo: index + 1,
       accountId: line.accountId,
       partyId: line.partyId,
-      // Swap the sides. The original entry is left exactly as it was.
       debitMinor: line.creditMinor,
       creditMinor: line.debitMinor,
       memo: 'reversal',
     })),
+  }
+
+  await store.journalEntries.insertOne(reversal, { session: store.session })
+
+  await store.documents.updateOne(
+    { _id: documentId },
+    { $set: { status: 'voided', voidedAt: new Date(), updatedAt: new Date() } },
+    { session: store.session },
   )
 
-  await tx
-    .update(documents)
-    .set({ status: 'voided', voidedAt: new Date(), updatedAt: new Date() })
-    .where(eq(documents.id, documentId))
-
-  await recordAudit(tx, {
+  await recordAudit(store, {
     entityId: doc.entityId,
     actorId: actor.id,
     actorEmail: actor.email,
     action: 'void',
     recordType: 'document',
-    recordId: doc.id,
+    recordId: doc._id,
     before: { status: 'posted' },
-    after: { status: 'voided', reversalEntryId: reversal.id },
+    after: { status: 'voided', reversalEntryId: reversal._id },
   })
 
-  return { reversalEntryId: reversal.id }
+  return { reversalEntryId: reversal._id }
 }
 
-/** Line-item taxes for a document, used when saving a draft. */
-export async function replaceDocumentLines(
-  tx: Db,
-  documentId: string,
+/** Builds the embedded `lines` array for a draft, priced and ready to store. */
+export function buildDocumentLines(
   lines: Array<{
     lineNo: number
     itemId?: string | null
@@ -563,40 +565,28 @@ export async function replaceDocumentLines(
       amountMinor: Minor
     }>
   }>,
-) {
-  await tx.delete(documentLines).where(eq(documentLines.documentId, documentId))
-
-  for (const line of lines) {
-    const [saved] = await tx
-      .insert(documentLines)
-      .values({
-        documentId,
-        lineNo: line.lineNo,
-        itemId: line.itemId ?? null,
-        description: line.description,
-        hsnSac: line.hsnSac,
-        unit: line.unit,
-        quantity: line.quantity,
-        unitPriceMinor: line.unitPriceMinor,
-        taxRatePercent: line.taxRatePercent,
-        incomeAccountId: line.incomeAccountId ?? null,
-        lineSubtotalMinor: line.lineSubtotalMinor,
-        lineDiscountMinor: line.lineDiscountMinor,
-        lineTaxMinor: line.lineTaxMinor,
-        lineTotalMinor: line.lineTotalMinor,
-      })
-      .returning()
-
-    if (line.taxes.length > 0) {
-      await tx.insert(documentLineTaxes).values(
-        line.taxes.map((tax) => ({
-          documentLineId: saved.id,
-          component: tax.component,
-          ratePercent: tax.ratePercent,
-          taxableMinor: tax.taxableMinor,
-          amountMinor: tax.amountMinor,
-        })),
-      )
-    }
-  }
+): DocumentLine[] {
+  return lines.map((line) => ({
+    _id: newId(),
+    lineNo: line.lineNo,
+    itemId: line.itemId ?? null,
+    description: line.description,
+    hsnSac: line.hsnSac,
+    unit: line.unit,
+    quantity: line.quantity,
+    unitPriceMinor: line.unitPriceMinor,
+    taxRatePercent: line.taxRatePercent,
+    incomeAccountId: line.incomeAccountId ?? null,
+    lineSubtotalMinor: line.lineSubtotalMinor,
+    lineDiscountMinor: line.lineDiscountMinor,
+    lineTaxMinor: line.lineTaxMinor,
+    lineTotalMinor: line.lineTotalMinor,
+    taxes: line.taxes.map((tax) => ({
+      component: tax.component,
+      ratePercent: tax.ratePercent,
+      taxableMinor: tax.taxableMinor,
+      amountMinor: tax.amountMinor,
+      accountId: null,
+    })),
+  }))
 }

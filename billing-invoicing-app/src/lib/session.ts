@@ -1,8 +1,7 @@
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { auth } from '@/auth'
-import { db } from '@/db'
-import { entities } from '@/db/schema'
+import { getDb } from '@/db'
 
 export type Role = 'admin' | 'accountant' | 'viewer'
 
@@ -26,7 +25,8 @@ export const getAppSession = cache(async (): Promise<AppSession | null> => {
   if (!session?.user?.id) return null
 
   // Single-tenant: exactly one entity, created by the setup script.
-  const [entity] = await db.select().from(entities).limit(1)
+  const store = await getDb()
+  const entity = await store.entities.findOne({})
   if (!entity) return null
 
   return {
@@ -34,7 +34,7 @@ export const getAppSession = cache(async (): Promise<AppSession | null> => {
     email: session.user.email ?? '',
     name: session.user.name ?? '',
     role: (session.user.role ?? 'viewer') as Role,
-    entityId: entity.id,
+    entityId: entity._id,
     entityName: entity.name,
   }
 })
@@ -73,7 +73,8 @@ export async function requireRole(atLeast: Role): Promise<AppSession> {
 }
 
 export async function requireEntity() {
-  const [entity] = await db.select().from(entities).limit(1)
+  const store = await getDb()
+  const entity = await store.entities.findOne({})
   if (!entity) {
     throw new Error('No entity configured. Run `npm run setup` first.')
   }

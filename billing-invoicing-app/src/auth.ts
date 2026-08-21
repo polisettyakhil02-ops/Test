@@ -2,10 +2,8 @@ import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
-import { sql } from 'drizzle-orm'
 import { authConfig } from '@/auth.config'
-import { db } from '@/db'
-import { users } from '@/db/schema'
+import { getDb } from '@/db'
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -26,21 +24,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const { email, password } = parsed.data
 
-        const [user] = await db
-          .select()
-          .from(users)
-          .where(sql`lower(${users.email}) = ${email.toLowerCase()}`)
-          .limit(1)
+        const store = await getDb()
+        const user = await store.users.findOne({ email: email.toLowerCase() })
 
-        if (!user || !user.isActive) return null
+        // Compare against a dummy hash when the user does not exist, so a
+        // missing account and a wrong password take the same time to answer.
+        const hash = user?.passwordHash ?? '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin'
+        const matches = await bcrypt.compare(password, hash)
 
-        const matches = await bcrypt.compare(password, user.passwordHash)
-        if (!matches) return null
+        if (!user || !user.isActive || !matches) return null
 
         // Returning null for every failure means the form cannot tell "no such
         // account" from "wrong password" -- don't leak which.
         return {
-          id: user.id,
+          id: user._id,
           name: user.name,
           email: user.email,
           role: user.role,

@@ -1,17 +1,17 @@
 import { Router } from 'express'
 import { renderToBuffer } from '@react-pdf/renderer'
-import { and, eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { documents, entities, journalEntries, journalLines, accounts, parties } from '@/db/schema'
+import { getDb, withTransaction } from '@/db'
+import { newId } from '@/db/ids'
+import type { DocumentDoc, DocumentLine, PartySnapshot } from '@/db/collections'
 import { badRequest, handler, notFound, param } from '@/lib/errors'
 import { parseMinor } from '@/domain/money'
 import { priceDocument, resolveSupplyKind, taxSummary } from '@/domain/pricing'
 import {
+  buildDocumentLines,
   openBalanceMinor,
   postInvoice,
   postPayment,
   recordAudit,
-  replaceDocumentLines,
   reverseDocument,
 } from '@/domain/posting'
 import { buildEinvoicePayload, einvoiceBlockers } from '@/domain/einvoice'
@@ -37,9 +37,10 @@ documentRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
+    const store = await getDb()
     const docType = DOC_TYPES.find((t) => t === req.query.docType)
     res.json(
-      await listDocuments(session.entityId, {
+      await listDocuments(store, session.entityId, {
         docType,
         query: typeof req.query.q === 'string' ? req.query.q : '',
         page: page(req.query.page),
@@ -53,7 +54,8 @@ documentRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const found = await getDocument(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const found = await getDocument(store, session.entityId, param(req, 'id'))
     if (!found) throw notFound('That document no longer exists.')
 
     const summary = taxSummary(
@@ -75,23 +77,37 @@ documentRoutes.get(
 
     // The ledger entry this document produced, so the books are visible from
     // the document rather than hidden behind a report.
-    const entryLines =
-      found.doc.status === 'posted' || found.doc.status === 'voided'
-        ? await db
-            .select({
-              entryId: journalEntries.id,
-              memo: journalEntries.memo,
-              code: accounts.code,
-              name: accounts.name,
-              debitMinor: journalLines.debitMinor,
-              creditMinor: journalLines.creditMinor,
-            })
-            .from(journalLines)
-            .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-            .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
-            .where(eq(journalEntries.sourceId, found.doc.id))
-            .orderBy(journalEntries.postedAt, journalLines.lineNo)
-        : []
+    const entryLines: Array<{
+      entryId: string
+      memo: string
+      code: string
+      name: string
+      debitMinor: number
+      creditMinor: number
+    }> = []
+
+    if (found.doc.status === 'posted' || found.doc.status === 'voided') {
+      const entry = await store.journalEntries.findOne(
+        { sourceId: found.doc.id },
+        { sort: { postedAt: 1 } },
+      )
+      if (entry) {
+        const accountIds = [...new Set(entry.lines.map((l) => l.accountId))]
+        const accounts = await store.accounts.find({ _id: { $in: accountIds } }).toArray()
+        const byId = new Map(accounts.map((a) => [a._id, a]))
+        for (const line of entry.lines) {
+          const account = byId.get(line.accountId)
+          entryLines.push({
+            entryId: entry._id,
+            memo: entry.memo,
+            code: account?.code ?? '',
+            name: account?.name ?? '',
+            debitMinor: line.debitMinor,
+            creditMinor: line.creditMinor,
+          })
+        }
+      }
+    }
 
     // Whether it can be registered, computed with the same code the payload
     // route runs -- so the UI cannot promise something the download refuses.
@@ -108,20 +124,16 @@ documentRoutes.get(
   }),
 )
 
-/** Prices a draft and writes it, header and lines together. */
-async function saveDraft(
+/** Prices a draft into a full document — header and lines together, one write. */
+async function priceDraft(
   session: { entityId: string },
   input: ReturnType<typeof invoiceSchema.parse>,
-  documentId?: string,
-) {
-  const [party] = await db
-    .select()
-    .from(parties)
-    .where(and(eq(parties.entityId, session.entityId), eq(parties.id, input.partyId)))
-    .limit(1)
+): Promise<Omit<DocumentDoc, '_id' | 'createdAt' | 'updatedAt'>> {
+  const store = await getDb()
+  const party = await store.parties.findOne({ _id: input.partyId, entityId: session.entityId })
   if (!party) throw badRequest('That client no longer exists.')
 
-  const [org] = await db.select().from(entities).where(eq(entities.id, session.entityId)).limit(1)
+  const org = await store.entities.findOne({ _id: session.entityId })
   const supplyKind = resolveSupplyKind(org?.stateCode ?? '', party.stateCode)
 
   const priced = priceDocument({
@@ -136,60 +148,61 @@ async function saveDraft(
     supplyKind,
   })
 
-  const header = {
+  const partySnapshot: PartySnapshot = {
+    name: party.name,
+    email: party.email,
+    phone: party.phone,
+    gstin: party.gstin,
+    stateCode: party.stateCode,
+    address: formatAddress(party.billingAddress),
+  }
+
+  const lines: DocumentLine[] = buildDocumentLines(
+    input.lines.map((line, index) => ({
+      lineNo: index + 1,
+      itemId: line.itemId ?? null,
+      description: line.description,
+      hsnSac: line.hsnSac,
+      unit: line.unit || 'unit',
+      quantity: line.quantity,
+      unitPriceMinor: parseMinor(line.unitPrice),
+      taxRatePercent: line.taxRatePercent,
+      ...priced.lines[index],
+    })),
+  )
+
+  return {
     entityId: session.entityId,
     docType: input.docType,
-    partyId: party.id,
-    partySnapshot: {
-      name: party.name,
-      email: party.email,
-      phone: party.phone,
-      gstin: party.gstin,
-      stateCode: party.stateCode,
-      address: formatAddress(party.billingAddress),
-    },
+    docNumber: null,
+    status: 'draft',
+    partyId: party._id,
+    partySnapshot,
     issueDate: input.issueDate,
     dueDate: input.dueDate || null,
+    currency: 'INR',
+    fxRate: '1',
     subtotalMinor: priced.subtotalMinor,
     discountMinor: priced.discountMinor,
     taxMinor: priced.taxMinor,
     totalMinor: priced.totalMinor,
+    allocatedMinor: 0,
     discountType: input.discountType,
     discountValue: input.discountValue,
     supplyKind,
     placeOfSupply: party.stateCode,
+    correctsDocumentId: input.correctsDocumentId,
     notes: input.notes,
     terms: input.terms,
-    correctsDocumentId: input.correctsDocumentId,
-    updatedAt: new Date(),
+    irn: null,
+    ackNo: null,
+    ackDate: null,
+    signedQrCode: null,
+    postedAt: null,
+    postedBy: null,
+    voidedAt: null,
+    lines,
   }
-
-  return db.transaction(async (tx) => {
-    let id = documentId
-    if (id) {
-      await tx.update(documents).set(header).where(eq(documents.id, id))
-    } else {
-      const [created] = await tx.insert(documents).values(header).returning()
-      id = created.id
-    }
-
-    await replaceDocumentLines(
-      tx,
-      id,
-      input.lines.map((line, index) => ({
-        lineNo: index + 1,
-        itemId: line.itemId ?? null,
-        description: line.description,
-        hsnSac: line.hsnSac,
-        unit: line.unit || 'unit',
-        quantity: line.quantity,
-        unitPriceMinor: parseMinor(line.unitPrice),
-        taxRatePercent: line.taxRatePercent,
-        ...priced.lines[index],
-      })),
-    )
-    return id
-  })
 }
 
 documentRoutes.post(
@@ -197,7 +210,11 @@ documentRoutes.post(
   requireRole('accountant'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const id = await saveDraft(session, invoiceSchema.parse(req.body))
+    const built = await priceDraft(session, invoiceSchema.parse(req.body))
+    const store = await getDb()
+    const now = new Date()
+    const id = newId()
+    await store.documents.insertOne({ _id: id, ...built, createdAt: now, updatedAt: now })
     res.status(201).json({ id })
   }),
 )
@@ -207,7 +224,8 @@ documentRoutes.patch(
   requireRole('accountant'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const found = await getDocument(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const found = await getDocument(store, session.entityId, param(req, 'id'))
     if (!found) throw notFound('That document no longer exists.')
     if (found.doc.status !== 'draft') {
       throw badRequest('This document is posted and cannot be edited. Raise a credit note instead.')
@@ -218,7 +236,11 @@ documentRoutes.patch(
       docType: found.doc.docType,
       correctsDocumentId: found.doc.correctsDocumentId,
     })
-    await saveDraft(session, input, found.doc.id)
+    const built = await priceDraft(session, input)
+    await store.documents.updateOne(
+      { _id: found.doc.id, entityId: session.entityId },
+      { $set: { ...built, updatedAt: new Date() } },
+    )
     res.json({ id: found.doc.id })
   }),
 )
@@ -228,11 +250,15 @@ documentRoutes.delete(
   requireRole('accountant'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    // The database refuses this for anything not a draft, so there is no way to
-    // delete a posted document even by mistake.
-    await db
-      .delete(documents)
-      .where(and(eq(documents.entityId, session.entityId), eq(documents.id, param(req, 'id'))))
+    const store = await getDb()
+    const found = await getDocument(store, session.entityId, param(req, 'id'))
+    if (!found) throw notFound('That document no longer exists.')
+    // Draft-only, same as the update path — a posted document is refused here
+    // in application code, the same place every other write to it is refused.
+    if (found.doc.status !== 'draft') {
+      throw badRequest('A posted document cannot be deleted. Void it instead.')
+    }
+    await store.documents.deleteOne({ _id: found.doc.id, entityId: session.entityId })
     res.json({ ok: true })
   }),
 )
@@ -243,10 +269,11 @@ documentRoutes.post(
   requireRole('accountant'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const found = await getDocument(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const found = await getDocument(store, session.entityId, param(req, 'id'))
     if (!found) throw notFound('That document no longer exists.')
 
-    const result = await db.transaction(async (tx) =>
+    const result = await withTransaction(store, (tx) =>
       postInvoice(tx, found.doc.id, { id: session.userId, email: session.email }),
     )
     res.json({ number: result.number })
@@ -258,10 +285,11 @@ documentRoutes.post(
   requireRole('admin'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const found = await getDocument(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const found = await getDocument(store, session.entityId, param(req, 'id'))
     if (!found) throw notFound('That document no longer exists.')
 
-    await db.transaction(async (tx) =>
+    await withTransaction(store, (tx) =>
       reverseDocument(tx, found.doc.id, { id: session.userId, email: session.email }),
     )
     res.json({ ok: true })
@@ -269,16 +297,18 @@ documentRoutes.post(
 )
 
 /**
- * Stamps a posted invoice with what the IRP returned. The database allows this
- * exact update and nothing else on a posted document: write-once, with no other
- * column riding along.
+ * Stamps a posted invoice with what the IRP returned. This is the one field
+ * set a posted document accepts, and application code is what enforces that —
+ * see the comment on postInvoice in domain/posting.ts for why MongoDB itself
+ * cannot.
  */
 documentRoutes.post(
   '/documents/:id/irn',
   requireRole('accountant'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const found = await getDocument(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const found = await getDocument(store, session.entityId, param(req, 'id'))
     if (!found) throw notFound('That document no longer exists.')
     if (found.doc.status !== 'posted') throw badRequest('Only a posted document can carry an IRN.')
     if (found.doc.irn) {
@@ -286,11 +316,12 @@ documentRoutes.post(
     }
 
     const input = irnSchema.parse(req.body)
-    await db.transaction(async (tx) => {
-      await tx
-        .update(documents)
-        .set({ ...input, updatedAt: new Date() })
-        .where(eq(documents.id, found.doc.id))
+    await withTransaction(store, async (tx) => {
+      await tx.documents.updateOne(
+        { _id: found.doc.id },
+        { $set: { ...input, updatedAt: new Date() } },
+        { session: tx.session },
+      )
 
       await recordAudit(tx, {
         entityId: session.entityId,
@@ -335,10 +366,11 @@ documentRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const found = await getDocument(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const found = await getDocument(store, session.entityId, param(req, 'id'))
     if (!found) throw notFound('That document no longer exists.')
 
-    const [org] = await db.select().from(entities).where(eq(entities.id, session.entityId)).limit(1)
+    const org = await store.entities.findOne({ _id: session.entityId })
     const qr = found.doc.signedQrCode ? await qrDataUrl(found.doc.signedQrCode, 300) : null
 
     const buffer = await renderToBuffer(
@@ -408,7 +440,8 @@ documentRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    res.json({ rows: await openInvoicesFor(session.entityId, param(req, 'id')) })
+    const store = await getDb()
+    res.json({ rows: await openInvoicesFor(store, session.entityId, param(req, 'id')) })
   }),
 )
 
@@ -418,6 +451,7 @@ documentRoutes.post(
   handler(async (req, res) => {
     const session = sessionOf(req)
     const input = paymentSchema.parse(req.body)
+    const store = await getDb()
 
     const amountMinor = parseMinor(input.amount)
     const targets = input.allocations
@@ -431,45 +465,70 @@ documentRoutes.post(
       })
     }
 
-    const [party] = await db
-      .select()
-      .from(parties)
-      .where(and(eq(parties.entityId, session.entityId), eq(parties.id, input.partyId)))
-      .limit(1)
+    const party = await store.parties.findOne({ _id: input.partyId, entityId: session.entityId })
     if (!party) throw badRequest('That client no longer exists.')
 
     // Each allocation is capped at what the invoice still owes, so a stale form
     // cannot over-settle a document someone else just paid.
     for (const target of targets) {
-      const open = await openBalanceMinor(db, target.documentId)
+      const open = await openBalanceMinor(store, target.documentId)
       if (target.amountMinor > open) {
         throw badRequest('One of those invoices has already been settled. Reload and try again.')
       }
     }
 
-    const number = await db.transaction(async (tx) => {
-      const [payment] = await tx
-        .insert(documents)
-        .values({
+    const paymentId = newId()
+    const partySnapshot: PartySnapshot = {
+      name: party.name,
+      email: party.email,
+      phone: party.phone,
+      gstin: party.gstin,
+      stateCode: party.stateCode,
+      address: formatAddress(party.billingAddress),
+    }
+
+    const number = await withTransaction(store, async (tx) => {
+      const now = new Date()
+      await tx.documents.insertOne(
+        {
+          _id: paymentId,
           entityId: session.entityId,
           docType: 'payment',
-          partyId: party.id,
-          partySnapshot: {
-            name: party.name,
-            email: party.email,
-            phone: party.phone,
-            gstin: party.gstin,
-            stateCode: party.stateCode,
-            address: formatAddress(party.billingAddress),
-          },
+          docNumber: null,
+          status: 'draft',
+          partyId: party._id,
+          partySnapshot,
           issueDate: input.issueDate,
-          totalMinor: amountMinor,
+          dueDate: null,
+          currency: 'INR',
+          fxRate: '1',
           subtotalMinor: amountMinor,
+          discountMinor: 0,
+          taxMinor: 0,
+          totalMinor: amountMinor,
+          allocatedMinor: 0,
+          discountType: 'fixed',
+          discountValue: '0',
+          supplyKind: 'exempt',
+          placeOfSupply: '',
+          correctsDocumentId: null,
           notes: input.reference,
-        })
-        .returning()
+          terms: '',
+          irn: null,
+          ackNo: null,
+          ackDate: null,
+          signedQrCode: null,
+          postedAt: null,
+          postedBy: null,
+          voidedAt: null,
+          lines: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+        { session: tx.session },
+      )
 
-      const result = await postPayment(tx, payment.id, targets, {
+      const result = await postPayment(tx, paymentId, targets, {
         id: session.userId,
         email: session.email,
       })

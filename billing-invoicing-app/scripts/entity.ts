@@ -13,7 +13,7 @@
  * both require. Run with no flags to see what is currently set.
  */
 import { config as loadEnv } from 'dotenv'
-import postgres from 'postgres'
+import { MongoClient } from 'mongodb'
 
 loadEnv({ path: ['.env.local', '.env'], quiet: true })
 
@@ -31,16 +31,18 @@ function args(flag: string): string[] {
 }
 
 async function main() {
-  const url = process.env.DATABASE_URL
-  if (!url) {
-    console.error('Set DATABASE_URL in .env.local first.')
+  const uri = process.env.MONGODB_URI
+  if (!uri) {
+    console.error('Set MONGODB_URI in .env.local first.')
     process.exit(1)
   }
 
-  const sql = postgres(url, { max: 1 })
+  const client = new MongoClient(uri)
 
   try {
-    const [entity] = await sql`SELECT * FROM entities LIMIT 1`
+    await client.connect()
+    const entities = client.db().collection('entities')
+    const entity = await entities.findOne({})
     if (!entity) {
       console.error('No entity yet. Run `npm run setup` first.')
       process.exit(1)
@@ -71,36 +73,34 @@ async function main() {
 
     if (nothingToDo) {
       console.log(`Name:        ${entity.name}`)
-      console.log(`Legal name:  ${entity.legal_name || '(not set)'}`)
+      console.log(`Legal name:  ${entity.legalName || '(not set)'}`)
       console.log(`GSTIN:       ${entity.gstin || '(not set)'}`)
-      console.log(`State code:  ${entity.state_code || '(not set)'}`)
-      console.log(`Address:     ${(entity.address_lines as string[]).join(' / ') || '(not set)'}`)
+      console.log(`State code:  ${entity.stateCode || '(not set)'}`)
+      console.log(`Address:     ${(entity.addressLines as string[]).join(' / ') || '(not set)'}`)
       console.log(`Email:       ${entity.email || '(not set)'}`)
       console.log(`Phone:       ${entity.phone || '(not set)'}`)
-      console.log(`Bank:        ${entity.bank_details || '(not set)'}`)
+      console.log(`Bank:        ${entity.bankDetails || '(not set)'}`)
 
-      const lines = (entity.address_lines as string[]).join(' ')
+      const lines = (entity.addressLines as string[]).join(' ')
       if (!entity.gstin || !/\b\d{6}\b/.test(lines)) {
         console.log('\nA GSTIN and a 6-digit PIN code in the address are needed for e-invoicing.')
       }
       return
     }
 
-    await sql`
-      UPDATE entities SET
-        gstin         = COALESCE(${gstin ?? null}, gstin),
-        legal_name    = COALESCE(${legalName ?? null}, legal_name),
-        state_code    = COALESCE(${stateCode ?? null}, state_code),
-        email         = COALESCE(${email ?? null}, email),
-        phone         = COALESCE(${phone ?? null}, phone),
-        bank_details  = COALESCE(${bank ?? null}, bank_details),
-        address_lines = COALESCE(${address.length ? sql.json(address) : null}, address_lines)
-      WHERE id = ${entity.id}
-    `
+    const set: Record<string, unknown> = {}
+    if (gstin) set.gstin = gstin
+    if (legalName) set.legalName = legalName
+    if (stateCode) set.stateCode = stateCode
+    if (email) set.email = email
+    if (phone) set.phone = phone
+    if (bank) set.bankDetails = bank
+    if (address.length) set.addressLines = address
 
+    await entities.updateOne({ _id: entity._id }, { $set: set })
     console.log('Entity updated. Re-run with no flags to see the result.')
   } finally {
-    await sql.end({ timeout: 5 })
+    await client.close()
   }
 }
 

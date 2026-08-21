@@ -1,7 +1,5 @@
-import { desc } from 'drizzle-orm'
 import { Radio } from 'lucide-react'
-import { db } from '@/db'
-import { outbox } from '@/db/schema'
+import { getDb } from '@/db'
 import { requireSession } from '@/lib/session'
 import { MAX_ATTEMPTS, outboxSummary } from '@/domain/webhooks'
 import { webhookConfig } from '@/lib/webhook-config'
@@ -21,14 +19,11 @@ const dateTime = new Intl.DateTimeFormat('en-IN', {
 
 export default async function OutboxPage() {
   const session = await requireSession()
-  const summary = await outboxSummary(db)
+  const store = await getDb()
+  const summary = await outboxSummary(store)
   const configured = webhookConfig() !== null
 
-  const rows = await db
-    .select()
-    .from(outbox)
-    .orderBy(desc(outbox.createdAt))
-    .limit(100)
+  const rows = await store.outbox.find({}).sort({ createdAt: -1 }).limit(100).toArray()
 
   return (
     <div className="flex flex-col gap-6">
@@ -93,7 +88,7 @@ export default async function OutboxPage() {
               {rows.map((row) => {
                 const dead = !row.deliveredAt && row.attempts >= MAX_ATTEMPTS
                 return (
-                  <TableRow key={row.id}>
+                  <TableRow key={row._id}>
                     <TableCell className="font-medium">{row.topic}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {dateTime.format(row.createdAt)}
@@ -113,7 +108,7 @@ export default async function OutboxPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {!row.deliveredAt && session.role === 'admin' ? (
-                        <RetryButton action={retryEvent.bind(null, row.id)} />
+                        <RetryButton action={retryEvent.bind(null, row._id)} />
                       ) : null}
                     </TableCell>
                   </TableRow>

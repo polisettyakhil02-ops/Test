@@ -1,10 +1,22 @@
 import { Router } from 'express'
-import { and, eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { entities, items, parties } from '@/db/schema'
-import { handler, notFound, param } from '@/lib/errors'
+import { getDb } from '@/db'
+import { badRequest, handler, notFound, param } from '@/lib/errors'
 import { parseMinor } from '@/domain/money'
-import { allItems, allParties, getItem, getParty, listItems, listParties } from '@/lib/queries'
+import {
+  allItems,
+  allParties,
+  deleteItem,
+  deleteParty,
+  getItem,
+  getParty,
+  insertItem,
+  insertParty,
+  listItems,
+  listParties,
+  updateItem,
+  updateParty,
+} from '@/lib/queries'
+import { withId } from '@/lib/serialize'
 import { itemSchema, partySchema } from '@/lib/validation'
 import { requireAuth, requireRole, sessionOf } from '@/middleware/auth'
 
@@ -22,9 +34,10 @@ masterRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const [entity] = await db.select().from(entities).where(eq(entities.id, session.entityId)).limit(1)
+    const store = await getDb()
+    const entity = await store.entities.findOne({ _id: session.entityId })
     if (!entity) throw notFound('No entity configured.')
-    res.json({ entity })
+    res.json({ entity: withId(entity) })
   }),
 )
 
@@ -35,12 +48,13 @@ masterRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
+    const store = await getDb()
     if (req.query.all === 'true') {
-      res.json({ rows: await allParties(session.entityId) })
+      res.json({ rows: await allParties(store, session.entityId) })
       return
     }
     res.json(
-      await listParties(session.entityId, {
+      await listParties(store, session.entityId, {
         query: typeof req.query.q === 'string' ? req.query.q : '',
         page: page(req.query.page),
       }),
@@ -53,7 +67,8 @@ masterRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const party = await getParty(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const party = await getParty(store, session.entityId, param(req, 'id'))
     if (!party) throw notFound('That client no longer exists.')
     res.json({ party })
   }),
@@ -65,10 +80,8 @@ masterRoutes.post(
   handler(async (req, res) => {
     const session = sessionOf(req)
     const input = partySchema.parse(req.body)
-    const [party] = await db
-      .insert(parties)
-      .values({ entityId: session.entityId, ...input })
-      .returning()
+    const store = await getDb()
+    const party = await insertParty(store, session.entityId, input)
     res.status(201).json({ party })
   }),
 )
@@ -78,15 +91,12 @@ masterRoutes.patch(
   requireRole('accountant'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const existing = await getParty(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const existing = await getParty(store, session.entityId, param(req, 'id'))
     if (!existing) throw notFound('That client no longer exists.')
 
     const input = partySchema.parse(req.body)
-    const [party] = await db
-      .update(parties)
-      .set(input)
-      .where(and(eq(parties.entityId, session.entityId), eq(parties.id, param(req, 'id'))))
-      .returning()
+    const party = await updateParty(store, session.entityId, param(req, 'id'), input)
     res.json({ party })
   }),
 )
@@ -96,11 +106,20 @@ masterRoutes.delete(
   requireRole('admin'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    // A client with documents is refused by a foreign key, which the error
-    // middleware turns into a 409 with the database's own message.
-    await db
-      .delete(parties)
-      .where(and(eq(parties.entityId, session.entityId), eq(parties.id, param(req, 'id'))))
+    const store = await getDb()
+
+    // MongoDB has no foreign key to refuse this on its own, so the check that
+    // a client with documents cannot be deleted is made here, explicitly,
+    // rather than relying on a constraint the database does not have.
+    const hasDocuments = await store.documents.findOne(
+      { entityId: session.entityId, partyId: param(req, 'id') },
+      { projection: { _id: 1 } },
+    )
+    if (hasDocuments) {
+      throw badRequest('This client has documents on file and cannot be deleted.')
+    }
+
+    await deleteParty(store, session.entityId, param(req, 'id'))
     res.json({ ok: true })
   }),
 )
@@ -112,12 +131,13 @@ masterRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
+    const store = await getDb()
     if (req.query.all === 'true') {
-      res.json({ rows: await allItems(session.entityId) })
+      res.json({ rows: await allItems(store, session.entityId) })
       return
     }
     res.json(
-      await listItems(session.entityId, {
+      await listItems(store, session.entityId, {
         query: typeof req.query.q === 'string' ? req.query.q : '',
         page: page(req.query.page),
       }),
@@ -130,7 +150,8 @@ masterRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const item = await getItem(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const item = await getItem(store, session.entityId, param(req, 'id'))
     if (!item) throw notFound('That item no longer exists.')
     res.json({ item })
   }),
@@ -154,10 +175,8 @@ masterRoutes.post(
   handler(async (req, res) => {
     const session = sessionOf(req)
     const input = itemSchema.parse(req.body)
-    const [item] = await db
-      .insert(items)
-      .values({ entityId: session.entityId, ...itemRow(input) })
-      .returning()
+    const store = await getDb()
+    const item = await insertItem(store, session.entityId, itemRow(input))
     res.status(201).json({ item })
   }),
 )
@@ -167,15 +186,12 @@ masterRoutes.patch(
   requireRole('accountant'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const existing = await getItem(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const existing = await getItem(store, session.entityId, param(req, 'id'))
     if (!existing) throw notFound('That item no longer exists.')
 
     const input = itemSchema.parse(req.body)
-    const [item] = await db
-      .update(items)
-      .set(itemRow(input))
-      .where(and(eq(items.entityId, session.entityId), eq(items.id, param(req, 'id'))))
-      .returning()
+    const item = await updateItem(store, session.entityId, param(req, 'id'), itemRow(input))
     res.json({ item })
   }),
 )
@@ -185,9 +201,8 @@ masterRoutes.delete(
   requireRole('admin'),
   handler(async (req, res) => {
     const session = sessionOf(req)
-    await db
-      .delete(items)
-      .where(and(eq(items.entityId, session.entityId), eq(items.id, param(req, 'id'))))
+    const store = await getDb()
+    await deleteItem(store, session.entityId, param(req, 'id'))
     res.json({ ok: true })
   }),
 )

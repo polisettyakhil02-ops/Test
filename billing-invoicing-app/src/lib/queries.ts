@@ -1,7 +1,5 @@
-import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
-import { alias } from 'drizzle-orm/pg-core'
-import { db } from '@/db'
-import { documentLineTaxes, documentLines, documents, items, parties } from '@/db/schema'
+import { getDb } from '@/db'
+import type { DocumentDoc, DocumentLine, DocType, PartyDoc, ItemDoc } from '@/db/collections'
 import { PAGE_SIZE, paged, pageOffset, type Page } from '@/lib/paging'
 import { isRecordId } from '@/lib/record-id'
 
@@ -10,92 +8,89 @@ export { PAGE_SIZE, pageOffset, type Page } from '@/lib/paging'
 /**
  * Read-side queries shared by the pages.
  *
- * Note there is no `containsRegex` helper any more: parameterised `ILIKE` with
- * an escaped pattern replaces hand-built regexes, so a search for "(" is just a
- * literal bracket rather than something that can blow up a query.
+ * Escapes a substring for use inside a case-insensitive Mongo regex — the
+ * direct replacement for parameterised `ILIKE` with an escaped `%`/`_`
+ * pattern: a search for "(" stays a literal bracket rather than something
+ * that can blow up a query, just via regex-metacharacter escaping instead of
+ * SQL LIKE-wildcard escaping.
  */
+function searchPattern(query: string): RegExp {
+  return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+}
 
-/** Escapes LIKE wildcards so user input is matched literally. */
-function likePattern(query: string): string {
-  return `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+/** Renames Mongo's `_id` to the `id` every page already expects. */
+function withId<T extends { _id: string }>(doc: T): Omit<T, '_id'> & { id: string } {
+  const { _id, ...rest } = doc
+  return { id: _id, ...rest }
 }
 
 export async function listParties(
   entityId: string,
   query: string,
   options: { page?: number; pageSize?: number } = {},
-): Promise<Page<typeof parties.$inferSelect>> {
+): Promise<Page<Omit<PartyDoc, '_id'> & { id: string }>> {
+  const store = await getDb()
   const page = Math.max(options.page ?? 1, 1)
   const pageSize = options.pageSize ?? PAGE_SIZE
 
-  const where = query
-    ? and(
-        eq(parties.entityId, entityId),
-        or(
-          ilike(parties.name, likePattern(query)),
-          ilike(parties.email, likePattern(query)),
-          ilike(parties.gstin, likePattern(query)),
-        ),
-      )
-    : eq(parties.entityId, entityId)
+  const filter = query
+    ? {
+        entityId,
+        $or: [
+          { name: searchPattern(query) },
+          { email: searchPattern(query) },
+          { gstin: searchPattern(query) },
+        ],
+      }
+    : { entityId }
 
-  // Sequential rather than Promise.all on purpose: `npm run dev:db` serves a
-  // single-connection PGlite, and issuing two queries at once against it is a
-  // property of the harness that has no business shaping the query layer.
-  const rows = await db
-    .select()
-    .from(parties)
-    .where(where)
-    .orderBy(asc(parties.name))
+  const rows = await store.parties
+    .find(filter)
+    .sort({ name: 1 })
+    .skip(pageOffset(page, pageSize))
     .limit(pageSize)
-    .offset(pageOffset(page, pageSize))
+    .toArray()
+  const total = await store.parties.countDocuments(filter)
 
-  const [totals] = await db.select({ value: count() }).from(parties).where(where)
-
-  return paged(rows, Number(totals?.value ?? 0), page, pageSize)
+  return paged(rows.map(withId), total, page, pageSize)
 }
 
 export async function getParty(entityId: string, id: string) {
   if (!isRecordId(id)) return null
-
-  const [row] = await db
-    .select()
-    .from(parties)
-    .where(and(eq(parties.entityId, entityId), eq(parties.id, id)))
-    .limit(1)
-  return row ?? null
+  const store = await getDb()
+  const row = await store.parties.findOne({ _id: id, entityId })
+  return row ? withId(row) : null
 }
 
 export async function listItems(
   entityId: string,
   query: string,
   options: { page?: number; pageSize?: number } = {},
-): Promise<Page<typeof items.$inferSelect>> {
+): Promise<Page<Omit<ItemDoc, '_id'> & { id: string }>> {
+  const store = await getDb()
   const page = Math.max(options.page ?? 1, 1)
   const pageSize = options.pageSize ?? PAGE_SIZE
 
-  const where = query
-    ? and(
-        eq(items.entityId, entityId),
-        or(
-          ilike(items.name, likePattern(query)),
-          ilike(items.hsnSac, likePattern(query)),
-          ilike(items.description, likePattern(query)),
-        ),
-      )
-    : eq(items.entityId, entityId)
+  const filter = query
+    ? {
+        entityId,
+        $or: [
+          { name: searchPattern(query) },
+          { hsnSac: searchPattern(query) },
+          { description: searchPattern(query) },
+        ],
+      }
+    : { entityId }
 
-  const rows = await db
-    .select()
-    .from(items)
-    .where(where)
-    .orderBy(asc(items.name))
+  const rows = await store.items
+    .find(filter)
+    .sort({ name: 1 })
+    .skip(pageOffset(page, pageSize))
     .limit(pageSize)
-    .offset(pageOffset(page, pageSize))
+    .toArray()
+  const total = await store.items.countDocuments(filter)
 
-  const [totals] = await db.select({ value: count() }).from(items).where(where)
-
-  return paged(rows, Number(totals?.value ?? 0), page, pageSize)
+  return paged(rows.map(withId), total, page, pageSize)
 }
 
 /**
@@ -107,32 +102,22 @@ export async function listItems(
 export const PICKER_LIMIT = 500
 
 export async function allItems(entityId: string) {
-  return db
-    .select()
-    .from(items)
-    .where(eq(items.entityId, entityId))
-    .orderBy(asc(items.name))
-    .limit(PICKER_LIMIT)
+  const store = await getDb()
+  const rows = await store.items.find({ entityId }).sort({ name: 1 }).limit(PICKER_LIMIT).toArray()
+  return rows.map(withId)
 }
 
 export async function allParties(entityId: string) {
-  return db
-    .select()
-    .from(parties)
-    .where(eq(parties.entityId, entityId))
-    .orderBy(asc(parties.name))
-    .limit(PICKER_LIMIT)
+  const store = await getDb()
+  const rows = await store.parties.find({ entityId }).sort({ name: 1 }).limit(PICKER_LIMIT).toArray()
+  return rows.map(withId)
 }
 
 export async function getItem(entityId: string, id: string) {
   if (!isRecordId(id)) return null
-
-  const [row] = await db
-    .select()
-    .from(items)
-    .where(and(eq(items.entityId, entityId), eq(items.id, id)))
-    .limit(1)
-  return row ?? null
+  const store = await getDb()
+  const row = await store.items.findOne({ _id: id, entityId })
+  return row ? withId(row) : null
 }
 
 export interface DocumentListRow {
@@ -150,65 +135,74 @@ export interface DocumentListRow {
 /**
  * Documents with how much has been settled against each.
  *
- * The allocated figure is a subquery rather than a column: settlement is
- * derived from the allocation rows, so it cannot drift out of step with them.
+ * `allocatedMinor` is read straight off the document rather than summed from
+ * `allocations` at query time — it is a maintained running total precisely so
+ * it can never drift out of step with them. See `allocateAmount` in
+ * `domain/posting.ts`.
  */
 export async function listDocuments(
   entityId: string,
   options: {
-    docType?: 'invoice' | 'credit_note' | 'payment'
+    docType?: DocType
     status?: string
     query?: string
     page?: number
     pageSize?: number
   },
 ): Promise<Page<DocumentListRow>> {
+  const store = await getDb()
   const page = Math.max(options.page ?? 1, 1)
   const pageSize = options.pageSize ?? PAGE_SIZE
-  const conditions = [eq(documents.entityId, entityId)]
 
-  if (options.docType) conditions.push(eq(documents.docType, options.docType))
-  if (options.status) conditions.push(eq(documents.status, options.status as 'draft'))
+  const filter: Record<string, unknown> = { entityId }
+  if (options.docType) filter.docType = options.docType
+  if (options.status) filter.status = options.status
   if (options.query) {
-    const pattern = likePattern(options.query)
-    conditions.push(
-      or(
-        ilike(sql`COALESCE(${documents.docNumber}, '')`, pattern),
-        ilike(sql`${documents.partySnapshot} ->> 'name'`, pattern),
-      )!,
-    )
+    const pattern = searchPattern(options.query)
+    filter.$or = [{ docNumber: pattern }, { 'partySnapshot.name': pattern }]
   }
 
-  const rows = await db
-    .select({
-      id: documents.id,
-      docType: documents.docType,
-      docNumber: documents.docNumber,
-      status: documents.status,
-      partyName: sql<string>`${documents.partySnapshot} ->> 'name'`,
-      issueDate: documents.issueDate,
-      dueDate: documents.dueDate,
-      totalMinor: documents.totalMinor,
-      allocatedMinor: sql<string>`(
-        SELECT COALESCE(SUM(a.amount_minor), 0)
-          FROM allocations a
-         WHERE a.to_document_id = ${documents.id}
-      )`,
-    })
-    .from(documents)
-    .where(and(...conditions))
-    .orderBy(desc(documents.issueDate), desc(documents.createdAt))
+  const rows = await store.documents
+    .find(filter)
+    .sort({ issueDate: -1, createdAt: -1 })
+    .skip(pageOffset(page, pageSize))
     .limit(pageSize)
-    .offset(pageOffset(page, pageSize))
-
-  const [totals] = await db
-    .select({ value: count() })
-    .from(documents)
-    .where(and(...conditions))
+    .project<{
+      _id: string
+      docType: DocType
+      docNumber: string | null
+      status: string
+      partySnapshot: { name: string }
+      issueDate: string
+      dueDate: string | null
+      totalMinor: number
+      allocatedMinor: number
+    }>({
+      docType: 1,
+      docNumber: 1,
+      status: 1,
+      partySnapshot: 1,
+      issueDate: 1,
+      dueDate: 1,
+      totalMinor: 1,
+      allocatedMinor: 1,
+    })
+    .toArray()
+  const total = await store.documents.countDocuments(filter)
 
   return paged(
-    rows.map((row) => ({ ...row, allocatedMinor: Number(row.allocatedMinor) })),
-    Number(totals?.value ?? 0),
+    rows.map((row) => ({
+      id: row._id,
+      docType: row.docType,
+      docNumber: row.docNumber,
+      status: row.status,
+      partyName: row.partySnapshot?.name ?? '',
+      issueDate: row.issueDate,
+      dueDate: row.dueDate,
+      totalMinor: row.totalMinor,
+      allocatedMinor: row.allocatedMinor,
+    })),
+    total,
     page,
     pageSize,
   )
@@ -217,7 +211,7 @@ export async function listDocuments(
 /**
  * Everything a GST return needs for a period, in one read.
  *
- * The join back to `documents` resolves the invoice a credit note corrects:
+ * The lookup back to `documents` resolves the invoice a credit note corrects:
  * CDNR reports the original invoice's number and date, not the note's.
  */
 export interface ReturnDocumentRow {
@@ -248,54 +242,22 @@ export async function listReturnDocuments(
   entityId: string,
   period: { from: string; to: string },
 ): Promise<ReturnDocumentRow[]> {
-  const corrected = alias(documents, 'corrected')
+  const store = await getDb()
 
-  const docs = await db
-    .select({
-      id: documents.id,
-      docType: documents.docType,
-      docNumber: documents.docNumber,
-      issueDate: documents.issueDate,
-      status: documents.status,
-      partySnapshot: documents.partySnapshot,
-      placeOfSupply: documents.placeOfSupply,
-      supplyKind: documents.supplyKind,
-      totalMinor: documents.totalMinor,
-      correctsDocNumber: corrected.docNumber,
-      correctsDocDate: corrected.issueDate,
-    })
-    .from(documents)
-    .leftJoin(corrected, eq(documents.correctsDocumentId, corrected.id))
-    .where(
-      and(
-        eq(documents.entityId, entityId),
-        eq(documents.status, 'posted'),
-        sql`${documents.docType} <> 'payment'`,
-        sql`${documents.issueDate} >= ${period.from}`,
-        sql`${documents.issueDate} <= ${period.to}`,
-      ),
-    )
-    .orderBy(asc(documents.issueDate), asc(documents.docNumber))
-
-  if (docs.length === 0) return []
-
-  const lines = await db
-    .select()
-    .from(documentLines)
-    .where(
-      inArray(
-        documentLines.documentId,
-        docs.map((doc) => doc.id),
-      ),
-    )
-    .orderBy(asc(documentLines.lineNo))
-
-  const byDocument = new Map<string, typeof lines>()
-  for (const line of lines) {
-    const bucket = byDocument.get(line.documentId) ?? []
-    bucket.push(line)
-    byDocument.set(line.documentId, bucket)
-  }
+  const docs = await store.documents
+    .aggregate<DocumentDoc & { corrects: DocumentDoc[] }>([
+      {
+        $match: {
+          entityId,
+          status: 'posted',
+          docType: { $ne: 'payment' },
+          issueDate: { $gte: period.from, $lte: period.to },
+        },
+      },
+      { $sort: { issueDate: 1, docNumber: 1 } },
+      { $lookup: { from: 'documents', localField: 'correctsDocumentId', foreignField: '_id', as: 'corrects' } },
+    ])
+    .toArray()
 
   return docs.map((doc) => ({
     docType: doc.docType as 'invoice' | 'credit_note',
@@ -307,9 +269,9 @@ export async function listReturnDocuments(
     placeOfSupply: doc.placeOfSupply || (doc.partySnapshot.stateCode ?? ''),
     supplyKind: doc.supplyKind,
     totalMinor: doc.totalMinor,
-    correctsDocNumber: doc.correctsDocNumber,
-    correctsDocDate: doc.correctsDocDate,
-    lines: (byDocument.get(doc.id) ?? []).map((line) => ({
+    correctsDocNumber: doc.corrects[0]?.docNumber ?? null,
+    correctsDocDate: doc.corrects[0]?.issueDate ?? null,
+    lines: doc.lines.map((line) => ({
       description: line.description,
       hsnSac: line.hsnSac,
       unit: line.unit,
@@ -322,79 +284,108 @@ export async function listReturnDocuments(
   }))
 }
 
+/** A document line, flattened for the page — the shape every template has always seen. */
+export interface DocumentLineFlat {
+  id: string
+  lineNo: number
+  itemId: string | null
+  description: string
+  hsnSac: string
+  unit: string
+  quantity: string
+  unitPriceMinor: number
+  taxRatePercent: string
+  lineSubtotalMinor: number
+  lineDiscountMinor: number
+  lineTaxMinor: number
+  lineTotalMinor: number
+}
+
+export interface TaxRowFlat {
+  documentLineId: string
+  component: string
+  ratePercent: string
+  taxableMinor: number
+  amountMinor: number
+}
+
+function flattenLines(lines: DocumentLine[]): { lines: DocumentLineFlat[]; taxes: TaxRowFlat[] } {
+  const flat: DocumentLineFlat[] = []
+  const taxes: TaxRowFlat[] = []
+
+  for (const line of lines) {
+    flat.push({
+      id: line._id,
+      lineNo: line.lineNo,
+      itemId: line.itemId,
+      description: line.description,
+      hsnSac: line.hsnSac,
+      unit: line.unit,
+      quantity: line.quantity,
+      unitPriceMinor: line.unitPriceMinor,
+      taxRatePercent: line.taxRatePercent,
+      lineSubtotalMinor: line.lineSubtotalMinor,
+      lineDiscountMinor: line.lineDiscountMinor,
+      lineTaxMinor: line.lineTaxMinor,
+      lineTotalMinor: line.lineTotalMinor,
+    })
+    for (const tax of line.taxes) {
+      taxes.push({ documentLineId: line._id, ...tax })
+    }
+  }
+
+  return { lines: flat, taxes }
+}
+
 export async function getDocument(entityId: string, id: string) {
   if (!isRecordId(id)) return null
+  const store = await getDb()
 
-  const [doc] = await db
-    .select()
-    .from(documents)
-    .where(and(eq(documents.entityId, entityId), eq(documents.id, id)))
-    .limit(1)
-
+  const doc = await store.documents.findOne({ _id: id, entityId })
   if (!doc) return null
 
-  const lines = await db
-    .select()
-    .from(documentLines)
-    .where(eq(documentLines.documentId, id))
-    .orderBy(asc(documentLines.lineNo))
+  const { lines, taxes } = flattenLines(doc.lines)
+  const header = withId(doc)
+  // `lines` stays on the Mongo document (that is where the tax breakdown
+  // lives) but every page has always read it as its own array, flattened
+  // above, so it does not belong on `doc` twice.
+  const { lines: _embedded, ...docHeader } = header
+  void _embedded
 
-  // The tax components stored at posting time -- CGST/SGST or IGST. Reading
-  // them back is what lets the document show the same breakdown it was issued
-  // with, rather than recomputing from a rate that may since have changed.
-  const taxes = lines.length
-    ? await db
-        .select()
-        .from(documentLineTaxes)
-        .where(
-          inArray(
-            documentLineTaxes.documentLineId,
-            lines.map((line) => line.id),
-          ),
-        )
-    : []
-
-  const [allocated] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(amount_minor), 0)`,
-    })
-    .from(sql`allocations`)
-    .where(sql`to_document_id = ${id}`)
-
-  return { doc, lines, taxes, allocatedMinor: Number(allocated?.total ?? 0) }
+  return { doc: docHeader, lines, taxes, allocatedMinor: doc.allocatedMinor }
 }
 
 /** Open invoices for a party, for the payment allocation screen. */
 export async function openInvoicesFor(entityId: string, partyId: string) {
   if (!isRecordId(partyId)) return []
+  const store = await getDb()
 
-  const rows = await db.execute(sql`
-    SELECT d.id,
-           d.doc_number,
-           d.issue_date,
-           d.due_date,
-           d.total_minor,
-           COALESCE(a.allocated, 0) AS allocated
-      FROM documents d
-      LEFT JOIN (
-            SELECT to_document_id, SUM(amount_minor) AS allocated
-              FROM allocations GROUP BY to_document_id
-           ) a ON a.to_document_id = d.id
-     WHERE d.entity_id = ${entityId}
-       AND d.party_id = ${partyId}
-       AND d.doc_type = 'invoice'
-       AND d.status = 'posted'
-       AND d.total_minor > COALESCE(a.allocated, 0)
-     ORDER BY d.issue_date
-  `)
+  const rows = await store.documents
+    .find({
+      entityId,
+      partyId,
+      docType: 'invoice',
+      status: 'posted',
+      $expr: { $gt: ['$totalMinor', '$allocatedMinor'] },
+    })
+    .sort({ issueDate: 1 })
+    .project<{
+      _id: string
+      docNumber: string | null
+      issueDate: string
+      dueDate: string | null
+      totalMinor: number
+      allocatedMinor: number
+    }>({ docNumber: 1, issueDate: 1, dueDate: 1, totalMinor: 1, allocatedMinor: 1 })
+    .toArray()
 
-  return (rows as unknown as Array<Record<string, unknown>>).map((row) => ({
-    id: String(row.id),
-    docNumber: (row.doc_number as string | null) ?? null,
-    issueDate: String(row.issue_date),
-    dueDate: (row.due_date as string | null) ?? null,
-    totalMinor: Number(row.total_minor),
-    allocatedMinor: Number(row.allocated),
-    openMinor: Number(row.total_minor) - Number(row.allocated),
+  return rows.map((row) => ({
+    id: row._id,
+    docNumber: row.docNumber,
+    issueDate: row.issueDate,
+    dueDate: row.dueDate,
+    totalMinor: row.totalMinor,
+    allocatedMinor: row.allocatedMinor,
+    openMinor: row.totalMinor - row.allocatedMinor,
   }))
 }

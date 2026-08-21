@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { AlertTriangle, ArrowRight, FileText, Landmark, Plus, Receipt, Wallet } from 'lucide-react'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { requireSession } from '@/lib/session'
 import { dashboardTotals, ageingReport } from '@/domain/reports'
 import { listDocuments } from '@/lib/queries'
@@ -40,10 +40,11 @@ function Stat({
 export default async function DashboardPage() {
   const session = await requireSession()
   const asOf = today()
+  const store = await getDb()
 
   const [totals, ageing, recentPage] = await Promise.all([
-    dashboardTotals(db, session.entityId, asOf),
-    ageingReport(db, session.entityId, asOf),
+    dashboardTotals(store, session.entityId, asOf),
+    ageingReport(store, session.entityId, asOf),
     listDocuments(session.entityId, { docType: 'invoice', pageSize: 6 }),
   ])
 

@@ -1,9 +1,10 @@
 # Deployment
 
-Three services, three decisions: where PostgreSQL lives, where the API runs,
-and where the static bundle is served from. They are independent — this
-document covers the combinations worth having, and the one thing that catches
-people out when the front end and the API end up on different sites.
+Two services and a managed database: where the API runs, where the static
+bundle is served from, and MongoDB Atlas holding the data. They are
+independent — this document covers the combinations worth having, and the one
+thing that catches people out when the front end and the API end up on
+different sites.
 
 ---
 
@@ -35,15 +36,65 @@ proxy. That is what `docker-compose.yml` does, and why it is the default.
 
 ---
 
+## MongoDB Atlas, first — everything else needs it
+
+This application posts every document inside a multi-document transaction, and
+MongoDB refuses transactions outright on a standalone server. Atlas clusters
+are already replica sets, which is the whole reason to reach for it instead of
+a single self-hosted `mongod`: nothing else here works without one.
+
+1. **Create a free cluster.** [cloud.mongodb.com](https://cloud.mongodb.com) →
+   Create a project → Build a Database → M0 (free) is enough to run the whole
+   app; upgrade later without changing anything but the connection string.
+2. **Create a database user.** Database Access → Add New Database User. Give
+   it a generated password, not one you also use anywhere else.
+3. **Allow your deployment's IP.** Network Access → Add IP Address. For a
+   container host with a dynamic IP, `0.0.0.0/0` (allow from anywhere) is the
+   pragmatic choice — the database user's password is still the thing standing
+   between the internet and your data, so make it a strong, generated one.
+4. **Get the connection string.** Cluster → Connect → Drivers → copy the
+   `mongodb+srv://` URI, fill in the user's password, and add a database name
+   before the `?`:
+   ```
+   mongodb+srv://billing:REDACTED@cluster0.xxxxx.mongodb.net/billing?retryWrites=true&w=majority
+   ```
+   That whole string is `MONGODB_URI`.
+5. **Ensure the indexes and validators.** Run once against a fresh cluster,
+   and safe to re-run on every deploy after:
+   ```bash
+   cd backend
+   MONGODB_URI='mongodb+srv://…' npm run migrate
+   ```
+
+There is no schema to migrate in the SQL sense — a MongoDB collection accepts
+any document until a validator says otherwise — so `npm run migrate` only
+ensures indexes and validators exist. It is genuinely a no-op the second time,
+not merely fast: `createIndex` and `collMod` with an identical spec are
+idempotent operations, not migrations with a ledger of what already ran.
+
+**Backups.** Atlas takes them for you on any paid tier (M10 and up); the free
+M0 tier does not include automated backups, so if you are running real books
+on it, either upgrade or export on a schedule yourself:
+```bash
+mongodump --uri="$MONGODB_URI" --archive=billing-$(date +%F).gz --gzip
+```
+Restore with `mongorestore --uri="$MONGODB_URI" --archive=billing-2026-08-17.gz --gzip`.
+Test the restore before you need it. A backup nobody has restored is a
+hypothesis, not a backup.
+
+---
+
 ## Option 1 — one box, Docker Compose
 
-The simplest thing that works, and the one to pick unless you have a reason not
-to. nginx serves the bundle and proxies `/api` to the backend, so everything is
-one origin.
+The simplest thing that works, and the one to pick unless you have a reason
+not to. nginx serves the bundle and proxies `/api` to the backend, so
+everything the *browser* talks to is one origin; the backend still reaches out
+to Atlas over the internet, same as any other client of a managed database.
 
 ```bash
 cp .env.example .env
-# POSTGRES_PASSWORD and JWT_SECRET are required; the rest have defaults.
+# MONGODB_URI (your Atlas connection string) and JWT_SECRET are required; the
+# rest have defaults.
 docker compose up -d --build
 
 docker compose run --rm backend node dist/scripts/setup.js \
@@ -51,9 +102,9 @@ docker compose run --rm backend node dist/scripts/setup.js \
   --company 'Your Business Pvt Ltd' --state 29
 ```
 
-Migrations run on every backend start. They record what they have applied, so
-this is a no-op once the schema is current — and it means the server can never
-come up against a schema older than its code.
+Indexes and validators are ensured on every backend start (`npm run migrate`
+runs before the server does). That is a no-op once they exist, and it means
+the server can never come up against a database missing a check it depends on.
 
 **Put TLS in front of it.** Compose publishes port 8080 in the clear. Caddy is
 two lines:
@@ -74,24 +125,17 @@ same origin, `SameSite=Lax`, no CORS involved.
 docker compose --profile webhooks up -d
 ```
 
-**Backups.** All the state is in one database:
-
-```bash
-docker compose exec db pg_dump -U billing -d billing --format=custom > billing.dump
-```
-
-Restore it somewhere before you need it. See `db/README.md`.
-
 ---
 
 ## Option 2 — front end on GitHub Pages, API elsewhere
 
 This is the "host it from GitHub" route. Pages serves static files, so it can
-host the browser app but not the API or the database — those need somewhere
-that can hold a PostgreSQL connection.
+host the browser app but not the API — that needs somewhere long-running that
+can hold a MongoDB connection.
 
-**1. Deploy the API and the database first.** Any container host works; see
-Option 3. Note its public HTTPS origin, e.g. `https://api.yourbusiness.com`.
+**1. Deploy the API first.** Any container host works; see Option 3. Point it
+at your Atlas cluster (`MONGODB_URI`). Note the API's public HTTPS origin,
+e.g. `https://api.yourbusiness.com`.
 
 **2. On the API**, set:
 
@@ -131,21 +175,21 @@ The same shape works on Netlify, Vercel or Cloudflare Pages — build
 
 | Variable | |
 | --- | --- |
-| `DATABASE_URL` | required |
+| `MONGODB_URI` | required — an Atlas connection string |
 | `JWT_SECRET` | required, long and random |
 | `CORS_ORIGINS` | required if a browser on another origin calls it |
 | `COOKIE_CROSS_SITE` | `true` for a cross-site front end |
-| `DATABASE_POOL_MAX` | below your database's connection limit |
+| `DATABASE_POOL_MAX` | below your Atlas tier's connection limit |
 | `PORT` | defaults to 4000 |
 
-Run migrations as a release step, or use the same command Compose does:
+Ensure indexes as a release step, or use the same command Compose does:
 
 ```
 sh -c "node dist/scripts/migrate.js && node dist/index.js"
 ```
 
-`GET /api/health` queries the database rather than just returning 200, so a
-process that is up but cannot reach PostgreSQL is reported unhealthy instead of
+`GET /api/health` pings the database rather than just returning 200, so a
+process that is up but cannot reach MongoDB is reported unhealthy instead of
 being kept in the load balancer. Point your platform's health check at it.
 
 The image runs as a non-root user and writes nothing to disk — no volume
@@ -154,30 +198,46 @@ needed.
 Platform notes:
 
 - **Fly.io** — `fly launch --dockerfile backend/Dockerfile`, then
-  `fly secrets set JWT_SECRET=… DATABASE_URL=…`. Their managed Postgres works;
-  so does an external one.
+  `fly secrets set JWT_SECRET=… MONGODB_URI=…`.
 - **Railway / Render** — point at `backend/` as the build context, set the
-  variables, use their Postgres add-on for `DATABASE_URL`.
+  variables. Both also offer their own MongoDB add-ons if you would rather not
+  use Atlas; anything that gives you a `mongodb://` or `mongodb+srv://` URI to
+  a replica set works.
 - **A VPS** — `docker compose up -d` from Option 1 is less work than any of
   the above.
 
 ---
 
-## Option 4 — managed database
+## Self-hosting MongoDB instead of Atlas
 
-Nothing depends on the `db` container. Point `DATABASE_URL` at any PostgreSQL
-13 or newer and run the migrations:
+Possible, and the official image makes it short, but it is more you now have
+to operate: backups, upgrades, and the one thing Atlas does for you that is
+easy to get wrong by hand — actually being a replica set. A single `mongod`
+container is not one, and transactions do not work at all without it.
 
 ```bash
-cd backend
-DATABASE_URL='postgres://…?sslmode=require' npm run migrate
+docker run -d --name billing-mongo \
+  -v billing-mongo-data:/data/db \
+  -p 127.0.0.1:27017:27017 \
+  mongo:7 --replSet rs0
+
+# One-time: tell it to be a (single-node) replica set.
+docker exec billing-mongo mongosh --eval "rs.initiate()"
 ```
 
-- **Neon, Supabase, RDS, Cloud SQL** all work. Append `sslmode=require` if the
-  connection string does not already have it.
-- Set `DATABASE_POOL_MAX` below the plan's connection limit. With a serverless
-  pooler in front, keep it small.
-- Remove the `db` service from `docker-compose.yml`, or just don't start it.
+Then:
+
+```
+MONGODB_URI=mongodb://127.0.0.1:27017/billing?replicaSet=rs0
+```
+
+This is not wired into `docker-compose.yml` because `rs.initiate()` is a
+one-time step Compose has no clean way to express as a health check — get it
+running once by hand, and it stays initiated across restarts as long as the
+volume persists. If you want more than one node for real durability (the
+actual reason to self-host a replica set rather than the free path to
+"transactions technically work"), you are past what a short recipe here should
+try to cover — Atlas has already done that work.
 
 ---
 
@@ -188,24 +248,24 @@ git pull
 docker compose up -d --build
 ```
 
-Migrations apply on start. They run one transaction per file, so a failure
-leaves the schema at the last complete migration rather than half-applied.
+Indexes and validators are ensured on every start. There is no migration
+ledger to fall behind — `ensureIndexes` either creates something or confirms
+it already matches, every time.
 
-Roll back by deploying the previous image. If the release included a migration
-that dropped or renamed something, restore from a backup instead — a schema
-change is not automatically reversible, and pretending otherwise is how data
-goes missing.
+Rolling back is deploying the previous image; there is no schema version to
+roll back separately from the code, because there is no schema version.
 
 ---
 
 ## A short checklist before you call it live
 
 - [ ] `JWT_SECRET` is long, random, and not the one from `.env.example`.
-- [ ] `POSTGRES_PASSWORD` likewise, and PostgreSQL is not published to the
-      internet.
+- [ ] The Atlas database user's password is generated, not reused, and Network
+      Access is not wider than it needs to be.
 - [ ] HTTPS terminates in front of the app.
 - [ ] `CORS_ORIGINS` lists exactly the origins you serve the app from.
-- [ ] A backup has been taken **and restored somewhere** at least once.
+- [ ] A backup exists — Atlas does this for you on M10+; on the free tier, you
+      have run `mongodump` at least once **and restored it somewhere**.
 - [ ] Your entity's GSTIN, state code and address are correct — they print on
       every invoice, and posted invoices keep their own copy, so fixing it
       later does not fix the ones already issued.

@@ -1,42 +1,23 @@
-# The whole application: PostgreSQL and the app, on your own machine.
+# The app, on your own machine. The database is not one of these services —
+# MongoDB Atlas is a managed replica set, which this application's transactions
+# require, and standing up your own replica set in a container is more to
+# operate than a solo developer needs. Point MONGODB_URI at your Atlas cluster.
 #
-#   cp .env.example .env      # then fill in POSTGRES_PASSWORD and AUTH_SECRET
+#   cp .env.example .env      # then fill in MONGODB_URI and AUTH_SECRET
 #   docker compose up -d --build
 #   docker compose run --rm app node dist-scripts/setup.cjs --email you@yourdomain.com --password "..."
 #
 # The app listens on 127.0.0.1:3000. Put a reverse proxy in front of it for TLS
-# and your domain -- see DEPLOY.md.
+# and your domain -- see DEPLOY.md. Self-hosting MongoDB instead of Atlas is
+# also covered there.
 
 services:
-  db:
-    image: postgres:18-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: billing
-      POSTGRES_USER: billing
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    # Not published to the host. The app reaches it over the compose network;
-    # nothing else needs to.
-    expose:
-      - '5432'
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U billing -d billing']
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
   app:
     build:
       context: .
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://billing:${POSTGRES_PASSWORD}@db:5432/billing
+      MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI in .env to your Atlas connection string}
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env — generate with `npx auth secret`}
       AUTH_URL: ${AUTH_URL:?set AUTH_URL in .env — your public https URL}
       AUTH_TRUST_HOST: 'true'
@@ -48,8 +29,8 @@ services:
     # in front of it.
     ports:
       - '127.0.0.1:3000:3000'
-    # Migrations run before the server starts, every boot. They are idempotent
-    # and record what they have applied, so a restart is a no-op.
+    # Indexes and validators are ensured before the server starts, every boot.
+    # That is idempotent, so a restart is a no-op.
     command: sh -c "node dist-scripts/migrate.cjs && node server.js"
 
   # Delivers queued webhook events. Started only when you ask for it:
@@ -59,14 +40,8 @@ services:
       context: .
     restart: unless-stopped
     profiles: ['webhooks']
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://billing:${POSTGRES_PASSWORD}@db:5432/billing
+      MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI in .env}
       WEBHOOK_ENDPOINT: ${WEBHOOK_ENDPOINT:?set WEBHOOK_ENDPOINT to run the outbox worker}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set WEBHOOK_SECRET to run the outbox worker}
     command: node dist-scripts/outbox-worker.cjs
-
-volumes:
-  db-data:

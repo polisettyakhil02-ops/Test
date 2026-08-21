@@ -7,7 +7,7 @@ build/
 .env.local
 .env.*.local
 
-# The PGlite development database.
+# The local MongoDB development replica set (npm run dev:db).
 .devdb*/
 
 *.log

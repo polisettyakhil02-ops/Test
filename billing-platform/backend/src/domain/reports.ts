@@ -1,12 +1,14 @@
-import { and, eq, sql } from 'drizzle-orm'
-import { accounts, allocations, documents, journalEntries, journalLines } from '@/db/schema'
-import type { Db } from '@/domain/posting'
+import { ACCOUNT_CODES } from '@/domain/posting'
+import type { Store } from '@/db/collections'
 import type { Minor } from '@/domain/money'
 
 /**
- * Every figure here is derived from the ledger, never from a column on a
+ * Every figure here is derived from the ledger, never from a field on a
  * document. That is the whole point: two reports cannot disagree if they read
- * the same journal lines.
+ * the same journal lines. The aggregation pipelines below are the Mongo
+ * equivalent of the SQL joins the Postgres version ran — `$unwind` turns each
+ * journal entry's embedded lines back into one row per line, which is exactly
+ * what joining `journal_lines` to `journal_entries` used to produce.
  */
 
 export interface TrialBalanceRow {
@@ -20,54 +22,61 @@ export interface TrialBalanceRow {
 }
 
 export async function trialBalance(
-  db: Db,
+  store: Store,
   entityId: string,
   upTo?: string,
 ): Promise<{ rows: TrialBalanceRow[]; totalDebitMinor: Minor; totalCreditMinor: Minor }> {
-  const rows = await db
-    .select({
-      accountId: accounts.id,
-      code: accounts.code,
-      name: accounts.name,
-      type: accounts.type,
-      debit: sql<string>`COALESCE(SUM(${journalLines.debitMinor}), 0)`,
-      credit: sql<string>`COALESCE(SUM(${journalLines.creditMinor}), 0)`,
-    })
-    .from(journalLines)
-    .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-    .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
-    .where(
-      upTo
-        ? and(eq(journalEntries.entityId, entityId), sql`${journalEntries.entryDate} <= ${upTo}`)
-        : eq(journalEntries.entityId, entityId),
-    )
-    .groupBy(accounts.id, accounts.code, accounts.name, accounts.type)
-    .orderBy(accounts.code)
-
-  const mapped: TrialBalanceRow[] = rows.map(
-    (row: {
+  const rows = await store.journalEntries
+    .aggregate<{
       accountId: string
       code: string
       name: string
       type: string
-      debit: string
-      credit: string
-    }) => {
-      const debitMinor = Number(row.debit)
-      const creditMinor = Number(row.credit)
-      // Assets and expenses are debit-natured; the rest are credit-natured.
-      const debitNatured = row.type === 'asset' || row.type === 'expense'
-      return {
-        accountId: row.accountId,
-        code: row.code,
-        name: row.name,
-        type: row.type,
-        debitMinor,
-        creditMinor,
-        balanceMinor: debitNatured ? debitMinor - creditMinor : creditMinor - debitMinor,
-      }
-    },
-  )
+      debit: number
+      credit: number
+    }>(
+      [
+        { $match: { entityId, ...(upTo ? { entryDate: { $lte: upTo } } : {}) } },
+        { $unwind: '$lines' },
+        {
+          $group: {
+            _id: '$lines.accountId',
+            debit: { $sum: '$lines.debitMinor' },
+            credit: { $sum: '$lines.creditMinor' },
+          },
+        },
+        { $lookup: { from: 'accounts', localField: '_id', foreignField: '_id', as: 'account' } },
+        { $unwind: '$account' },
+        {
+          $project: {
+            _id: 0,
+            accountId: '$_id',
+            code: '$account.code',
+            name: '$account.name',
+            type: '$account.type',
+            debit: 1,
+            credit: 1,
+          },
+        },
+        { $sort: { code: 1 } },
+      ],
+      { session: store.session },
+    )
+    .toArray()
+
+  const mapped: TrialBalanceRow[] = rows.map((row) => {
+    // Assets and expenses are debit-natured; the rest are credit-natured.
+    const debitNatured = row.type === 'asset' || row.type === 'expense'
+    return {
+      accountId: row.accountId,
+      code: row.code,
+      name: row.name,
+      type: row.type,
+      debitMinor: row.debit,
+      creditMinor: row.credit,
+      balanceMinor: debitNatured ? row.debit - row.credit : row.credit - row.debit,
+    }
+  })
 
   return {
     rows: mapped,
@@ -77,21 +86,26 @@ export async function trialBalance(
 }
 
 /** A customer's outstanding balance, straight from their AR journal lines. */
-export async function partyBalanceMinor(
-  db: Db,
-  entityId: string,
-  partyId: string,
-): Promise<Minor> {
-  const [row] = await db
-    .select({
-      debit: sql<string>`COALESCE(SUM(${journalLines.debitMinor}), 0)`,
-      credit: sql<string>`COALESCE(SUM(${journalLines.creditMinor}), 0)`,
-    })
-    .from(journalLines)
-    .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-    .where(and(eq(journalEntries.entityId, entityId), eq(journalLines.partyId, partyId)))
+export async function partyBalanceMinor(store: Store, entityId: string, partyId: string): Promise<Minor> {
+  const [row] = await store.journalEntries
+    .aggregate<{ debit: number; credit: number }>(
+      [
+        { $match: { entityId, 'lines.partyId': partyId } },
+        { $unwind: '$lines' },
+        { $match: { 'lines.partyId': partyId } },
+        {
+          $group: {
+            _id: null,
+            debit: { $sum: '$lines.debitMinor' },
+            credit: { $sum: '$lines.creditMinor' },
+          },
+        },
+      ],
+      { session: store.session },
+    )
+    .toArray()
 
-  return Number(row?.debit ?? 0) - Number(row?.credit ?? 0)
+  return (row?.debit ?? 0) - (row?.credit ?? 0)
 }
 
 export interface AgeingRow {
@@ -117,59 +131,52 @@ function bucketFor(daysOverdue: number): AgeingRow['bucket'] {
 }
 
 /** Open invoices with their age. Buckets are derived, never stored. */
-export async function ageingReport(
-  db: Db,
-  entityId: string,
-  asOf: string,
-): Promise<AgeingRow[]> {
-  const rows = await db.execute(sql`
-    SELECT d.id,
-           d.doc_number,
-           d.party_id,
-           d.party_snapshot ->> 'name' AS party_name,
-           d.issue_date,
-           d.due_date,
-           d.total_minor,
-           COALESCE(a.allocated, 0) AS allocated
-      FROM ${documents} d
-      LEFT JOIN (
-            SELECT to_document_id, SUM(amount_minor) AS allocated
-              FROM ${allocations}
-             GROUP BY to_document_id
-           ) a ON a.to_document_id = d.id
-     WHERE d.entity_id = ${entityId}
-       AND d.doc_type = 'invoice'
-       AND d.status = 'posted'
-       AND d.total_minor > COALESCE(a.allocated, 0)
-     ORDER BY d.issue_date
-  `)
+export async function ageingReport(store: Store, entityId: string, asOf: string): Promise<AgeingRow[]> {
+  const rows = await store.documents
+    .find(
+      {
+        entityId,
+        docType: 'invoice',
+        status: 'posted',
+        $expr: { $gt: ['$totalMinor', '$allocatedMinor'] },
+      },
+      {
+        session: store.session,
+        sort: { issueDate: 1 },
+        projection: {
+          docNumber: 1,
+          partyId: 1,
+          partySnapshot: 1,
+          issueDate: 1,
+          dueDate: 1,
+          totalMinor: 1,
+          allocatedMinor: 1,
+        },
+      },
+    )
+    .toArray()
 
   const asOfMs = Date.parse(`${asOf}T00:00:00Z`)
 
-  return (rows.rows ?? rows).map(
-    (row: Record<string, unknown>): AgeingRow => {
-      const totalMinor = Number(row.total_minor)
-      const allocatedMinor = Number(row.allocated)
-      const dueDate = (row.due_date as string | null) ?? null
-      const daysOverdue = dueDate
-        ? Math.floor((asOfMs - Date.parse(`${dueDate}T00:00:00Z`)) / 86_400_000)
-        : 0
+  return rows.map((row): AgeingRow => {
+    const daysOverdue = row.dueDate
+      ? Math.floor((asOfMs - Date.parse(`${row.dueDate}T00:00:00Z`)) / 86_400_000)
+      : 0
 
-      return {
-        documentId: String(row.id),
-        docNumber: (row.doc_number as string | null) ?? null,
-        partyId: String(row.party_id),
-        partyName: String(row.party_name ?? ''),
-        issueDate: String(row.issue_date),
-        dueDate,
-        totalMinor,
-        allocatedMinor,
-        openMinor: totalMinor - allocatedMinor,
-        daysOverdue: Math.max(daysOverdue, 0),
-        bucket: bucketFor(daysOverdue),
-      }
-    },
-  )
+    return {
+      documentId: row._id,
+      docNumber: row.docNumber,
+      partyId: row.partyId,
+      partyName: row.partySnapshot?.name ?? '',
+      issueDate: row.issueDate,
+      dueDate: row.dueDate,
+      totalMinor: row.totalMinor,
+      allocatedMinor: row.allocatedMinor,
+      openMinor: row.totalMinor - row.allocatedMinor,
+      daysOverdue: Math.max(daysOverdue, 0),
+      bucket: bucketFor(daysOverdue),
+    }
+  })
 }
 
 export interface DashboardTotals {
@@ -188,33 +195,27 @@ export interface DashboardTotals {
  * Revenue is the balance of income accounts, so a credit note reduces it
  * automatically — no special case, no second code path to keep in step.
  */
-export async function dashboardTotals(
-  db: Db,
-  entityId: string,
-  asOf: string,
-): Promise<DashboardTotals> {
-  const tb = await trialBalance(db, entityId)
+export async function dashboardTotals(store: Store, entityId: string, asOf: string): Promise<DashboardTotals> {
+  const tb = await trialBalance(store, entityId)
 
   const sumByType = (type: string) =>
     tb.rows.filter((row) => row.type === type).reduce((sum, row) => sum + row.balanceMinor, 0)
 
   const receivableMinor = tb.rows
-    .filter((row) => row.code === '1100')
+    .filter((row) => row.code === ACCOUNT_CODES.receivable)
     .reduce((sum, row) => sum + row.balanceMinor, 0)
 
   const taxPayableMinor = tb.rows
-    .filter((row) => row.code === '2200')
+    .filter((row) => row.code === ACCOUNT_CODES.gstOutput)
     .reduce((sum, row) => sum + row.balanceMinor, 0)
 
-  const ageing = await ageingReport(db, entityId, asOf)
+  const ageing = await ageingReport(store, entityId, asOf)
   const overdue = ageing.filter((row) => row.bucket !== 'current')
 
-  const [counts] = await db
-    .select({
-      drafts: sql<string>`COUNT(*) FILTER (WHERE ${documents.status} = 'draft')`,
-    })
-    .from(documents)
-    .where(and(eq(documents.entityId, entityId), eq(documents.docType, 'invoice')))
+  const draftCount = await store.documents.countDocuments(
+    { entityId, docType: 'invoice', status: 'draft' },
+    { session: store.session },
+  )
 
   return {
     revenueMinor: sumByType('income'),
@@ -223,55 +224,53 @@ export async function dashboardTotals(
     openInvoiceCount: ageing.length,
     overdueCount: overdue.length,
     overdueMinor: overdue.reduce((sum, row) => sum + row.openMinor, 0),
-    draftCount: Number(counts?.drafts ?? 0),
+    draftCount,
   }
 }
 
 /** Profit and loss for a date range, from income and expense accounts. */
-export async function profitAndLoss(db: Db, entityId: string, from: string, to: string) {
-  const rows = await db
-    .select({
-      code: accounts.code,
-      name: accounts.name,
-      type: accounts.type,
-      debit: sql<string>`COALESCE(SUM(${journalLines.debitMinor}), 0)`,
-      credit: sql<string>`COALESCE(SUM(${journalLines.creditMinor}), 0)`,
-    })
-    .from(journalLines)
-    .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-    .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
-    .where(
-      and(
-        eq(journalEntries.entityId, entityId),
-        sql`${journalEntries.entryDate} >= ${from}`,
-        sql`${journalEntries.entryDate} <= ${to}`,
-        sql`${accounts.type} IN ('income', 'expense')`,
-      ),
+export async function profitAndLoss(store: Store, entityId: string, from: string, to: string) {
+  const rows = await store.journalEntries
+    .aggregate<{ code: string; name: string; type: string; debit: number; credit: number }>(
+      [
+        { $match: { entityId, entryDate: { $gte: from, $lte: to } } },
+        { $unwind: '$lines' },
+        {
+          $group: {
+            _id: '$lines.accountId',
+            debit: { $sum: '$lines.debitMinor' },
+            credit: { $sum: '$lines.creditMinor' },
+          },
+        },
+        { $lookup: { from: 'accounts', localField: '_id', foreignField: '_id', as: 'account' } },
+        { $unwind: '$account' },
+        { $match: { 'account.type': { $in: ['income', 'expense'] } } },
+        {
+          $project: {
+            _id: 0,
+            code: '$account.code',
+            name: '$account.name',
+            type: '$account.type',
+            debit: 1,
+            credit: 1,
+          },
+        },
+        { $sort: { code: 1 } },
+      ],
+      { session: store.session },
     )
-    .groupBy(accounts.code, accounts.name, accounts.type)
-    .orderBy(accounts.code)
+    .toArray()
 
   const income = rows
-    .filter((r: { type: string }) => r.type === 'income')
-    .map((r: { code: string; name: string; debit: string; credit: string }) => ({
-      code: r.code,
-      name: r.name,
-      amountMinor: Number(r.credit) - Number(r.debit),
-    }))
+    .filter((r) => r.type === 'income')
+    .map((r) => ({ code: r.code, name: r.name, amountMinor: r.credit - r.debit }))
 
   const expenses = rows
-    .filter((r: { type: string }) => r.type === 'expense')
-    .map((r: { code: string; name: string; debit: string; credit: string }) => ({
-      code: r.code,
-      name: r.name,
-      amountMinor: Number(r.debit) - Number(r.credit),
-    }))
+    .filter((r) => r.type === 'expense')
+    .map((r) => ({ code: r.code, name: r.name, amountMinor: r.debit - r.credit }))
 
-  const incomeMinor = income.reduce((s: number, r: { amountMinor: number }) => s + r.amountMinor, 0)
-  const expenseMinor = expenses.reduce(
-    (s: number, r: { amountMinor: number }) => s + r.amountMinor,
-    0,
-  )
+  const incomeMinor = income.reduce((s, r) => s + r.amountMinor, 0)
+  const expenseMinor = expenses.reduce((s, r) => s + r.amountMinor, 0)
 
   return { income, expenses, incomeMinor, expenseMinor, netMinor: incomeMinor - expenseMinor }
 }

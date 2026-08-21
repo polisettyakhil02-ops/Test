@@ -49,17 +49,16 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
 
-# Migrations run from the container at deploy time, so the SQL has to be in the
-# image. The scripts that apply it are already bundled -- no node_modules of
-# their own, and nothing to install here.
+# The migrate script runs from the container at deploy time. There is no SQL
+# to ship alongside it -- MongoDB has no schema file, only the indexes and
+# validators ensureIndexes() creates at runtime -- so the bundled script is
+# everything this step needs.
 COPY --from=build --chown=nextjs:nodejs /app/dist-scripts ./dist-scripts
-COPY --from=build --chown=nextjs:nodejs /app/src/db/migrations ./src/db/migrations
-COPY --from=build --chown=nextjs:nodejs /app/src/db/ledger-guards.sql ./src/db/ledger-guards.sql
 
 USER nextjs
 EXPOSE 3000
 
-# The probe hits the app's own health route, which queries PostgreSQL: a process
+# The probe hits the app's own health route, which pings MongoDB: a process
 # that is up but cannot reach the database is not healthy, and a check that says
 # otherwise keeps it in the load balancer.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

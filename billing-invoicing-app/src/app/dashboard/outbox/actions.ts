@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { requireRole } from '@/lib/session'
 import { drainOutbox, retryNow } from '@/domain/webhooks'
 import { webhookConfig } from '@/lib/webhook-config'
@@ -24,7 +24,8 @@ export async function deliverNow(): Promise<DeleteResult> {
     }
   }
 
-  const result = await drainOutbox(db, config)
+  const store = await getDb()
+  const result = await drainOutbox(store, config)
   revalidatePath('/dashboard/outbox')
 
   if (result.attempted === 0) return { ok: true, message: 'Nothing was due.' }
@@ -42,7 +43,8 @@ export async function deliverNow(): Promise<DeleteResult> {
 /** Puts one event back at the front of the queue. */
 export async function retryEvent(id: string): Promise<DeleteResult> {
   await requireRole('admin')
-  await retryNow(db, id)
+  const store = await getDb()
+  await retryNow(store, id)
   revalidatePath('/dashboard/outbox')
   return { ok: true, message: 'Queued for the next drain.' }
 }

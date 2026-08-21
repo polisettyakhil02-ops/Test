@@ -5,8 +5,8 @@ import type { NextAuthConfig } from 'next-auth'
  *
  * `proxy.ts` runs on every matched request, so it instantiates NextAuth from
  * this file alone -- that is enough to verify and decode the session JWT
- * without pulling Mongoose into the request path. The full config in `auth.ts`
- * spreads this and adds the Credentials provider.
+ * without opening a MongoDB connection in the request path. The full config in
+ * `auth.ts` spreads this and adds the Credentials provider.
  */
 export const authConfig = {
   pages: {

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Timer } from 'lucide-react'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { requireSession } from '@/lib/session'
 import { ageingReport } from '@/domain/reports'
 import { formatDate, formatMoney, today } from '@/lib/dto'
@@ -15,7 +15,8 @@ const BUCKETS = ['current', '1-30', '31-60', '61-90', '90+'] as const
 export default async function AgeingPage() {
   const session = await requireSession()
   const asOf = today()
-  const rows = await ageingReport(db, session.entityId, asOf)
+  const store = await getDb()
+  const rows = await ageingReport(store, session.entityId, asOf)
   const total = rows.reduce((sum, r) => sum + r.openMinor, 0)
 
   return (

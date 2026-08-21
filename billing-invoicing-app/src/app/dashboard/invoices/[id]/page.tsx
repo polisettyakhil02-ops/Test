@@ -1,9 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, Download, FileText, Pencil, Undo2 } from 'lucide-react'
-import { and, eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { accounts, journalEntries, journalLines } from '@/db/schema'
+import { getDb } from '@/db'
 import { requireSession } from '@/lib/session'
 import { getDocument } from '@/lib/queries'
 import { einvoiceInputFor } from '@/lib/einvoice-input'
@@ -65,22 +63,28 @@ export default async function DocumentPage(props: PageProps<'/dashboard/invoices
 
   // The ledger entry this document produced -- shown so the books are visible
   // from the document rather than hidden behind a report.
-  const entryLines = doc.status === 'posted' || doc.status === 'voided'
-    ? await db
-        .select({
-          entryId: journalEntries.id,
-          memo: journalEntries.memo,
-          code: accounts.code,
-          name: accounts.name,
-          debit: journalLines.debitMinor,
-          credit: journalLines.creditMinor,
+  const entryLines: Array<{ entryId: string; memo: string; code: string; name: string; debit: number; credit: number }> = []
+
+  if (doc.status === 'posted' || doc.status === 'voided') {
+    const store = await getDb()
+    const entry = await store.journalEntries.findOne({ sourceId: doc.id }, { sort: { postedAt: 1 } })
+    if (entry) {
+      const accountIds = [...new Set(entry.lines.map((l) => l.accountId))]
+      const accountDocs = await store.accounts.find({ _id: { $in: accountIds } }).toArray()
+      const byId = new Map(accountDocs.map((a) => [a._id, a]))
+      for (const line of entry.lines) {
+        const account = byId.get(line.accountId)
+        entryLines.push({
+          entryId: entry._id,
+          memo: entry.memo,
+          code: account?.code ?? '',
+          name: account?.name ?? '',
+          debit: line.debitMinor,
+          credit: line.creditMinor,
         })
-        .from(journalLines)
-        .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-        .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
-        .where(and(eq(journalEntries.sourceId, doc.id)))
-        .orderBy(journalEntries.postedAt, journalLines.lineNo)
-    : []
+      }
+    }
+  }
 
   const isDraft = doc.status === 'draft'
   const isInvoice = doc.docType === 'invoice'

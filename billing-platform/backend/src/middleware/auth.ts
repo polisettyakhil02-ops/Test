@@ -1,8 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import jwt from 'jsonwebtoken'
-import { eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { entities, users } from '@/db/schema'
+import { getDb } from '@/db'
 import { config, SESSION_COOKIE } from '@/lib/config'
 import { forbidden, unauthorized } from '@/lib/errors'
 
@@ -63,19 +61,20 @@ export async function loadSession(req: Request): Promise<Session | null> {
   // The role is re-read from the database rather than trusted from the token,
   // so revoking someone's access takes effect on their next request instead of
   // whenever their token happens to expire.
-  const [user] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1)
+  const store = await getDb()
+  const user = await store.users.findOne({ _id: payload.sub })
   if (!user || !user.isActive) return null
 
   // Single-tenant: exactly one entity, created by the setup script.
-  const [entity] = await db.select().from(entities).limit(1)
+  const entity = await store.entities.findOne({})
   if (!entity) return null
 
   return {
-    userId: user.id,
+    userId: user._id,
     email: user.email,
     name: user.name,
     role: user.role as Role,
-    entityId: entity.id,
+    entityId: entity._id,
     entityName: entity.name,
   }
 }

@@ -1,8 +1,7 @@
 import { test, describe, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '@/db/testing'
-import { outbox } from '@/db/schema'
+import { newId } from '@/db/ids'
 import {
   MAX_ATTEMPTS,
   backoffSeconds,
@@ -26,11 +25,21 @@ before(async () => {
 })
 
 beforeEach(async () => {
-  await db.delete(outbox)
+  await db.outbox.deleteMany({})
 })
 
 async function queue(topic: string, payload: unknown = { hello: 'world' }) {
-  const [row] = await db.insert(outbox).values({ topic, payload }).returning()
+  const row = {
+    _id: newId(),
+    topic,
+    payload,
+    createdAt: new Date(),
+    deliveredAt: null,
+    attempts: 0,
+    nextAttemptAt: new Date(),
+    lastError: '',
+  }
+  await db.outbox.insertOne(row)
   return row
 }
 
@@ -51,9 +60,9 @@ const CONFIG = { endpoint: 'https://receiver.test/hook', secret: 'sh-secret' }
 /**
  * "Now", a moment ahead of the clock.
  *
- * Rows are inserted with `next_attempt_at DEFAULT now()`, so a pinned timestamp
- * stops being due the moment the wall clock passes it -- a test written that
- * way passes all morning and fails after lunch.
+ * Rows are inserted with `nextAttemptAt` set to the moment they are queued, so
+ * a pinned timestamp stops being due the moment the wall clock passes it -- a
+ * test written that way passes all morning and fails after lunch.
  */
 const dueNow = () => new Date(Date.now() + 1000)
 
@@ -133,7 +142,7 @@ describe('draining', () => {
     const body = String(call.init.body)
 
     assert.equal(call.url, CONFIG.endpoint)
-    assert.equal(headers['X-Billing-Delivery'], row.id)
+    assert.equal(headers['X-Billing-Delivery'], row._id)
     assert.equal(headers['X-Billing-Event'], 'invoice.posted')
     assert.deepEqual(JSON.parse(body).data, { documentId: 'abc', number: 'INV-00001' })
     assert.ok(
@@ -152,11 +161,11 @@ describe('draining', () => {
 
     assert.equal(result.failed, 1)
 
-    const [row] = await db.select().from(outbox)
-    assert.equal(row.deliveredAt, null)
-    assert.equal(row.attempts, 1)
-    assert.match(row.lastError, /500/)
-    assert.equal(row.nextAttemptAt.getTime(), now.getTime() + 60_000)
+    const row = await db.outbox.findOne({})
+    assert.equal(row?.deliveredAt, null)
+    assert.equal(row?.attempts, 1)
+    assert.match(row?.lastError ?? '', /500/)
+    assert.equal(row?.nextAttemptAt.getTime(), now.getTime() + 60_000)
   })
 
   test('an event scheduled into the future is not picked up early', async () => {
@@ -184,16 +193,13 @@ describe('draining', () => {
     const result = await drainOutbox(db, { ...CONFIG, fetchImpl: impl })
 
     assert.equal(result.failed, 1)
-    const [row] = await db.select().from(outbox)
-    assert.match(row.lastError, /ECONNREFUSED/)
+    const row = await db.outbox.findOne({})
+    assert.match(row?.lastError ?? '', /ECONNREFUSED/)
   })
 
   test('it gives up after MAX_ATTEMPTS rather than hammering forever', async () => {
     const row = await queue('invoice.posted')
-    await db
-      .update(outbox)
-      .set({ attempts: MAX_ATTEMPTS })
-      .where(eq(outbox.id, row.id))
+    await db.outbox.updateOne({ _id: row._id }, { $set: { attempts: MAX_ATTEMPTS } })
 
     const { impl, calls } = recordingFetch(() => new Response('', { status: 200 }))
     const result = await drainOutbox(db, { ...CONFIG, fetchImpl: impl })
@@ -204,12 +210,9 @@ describe('draining', () => {
 
   test('a dead-lettered event can be put back in the queue by hand', async () => {
     const row = await queue('invoice.posted')
-    await db
-      .update(outbox)
-      .set({ attempts: MAX_ATTEMPTS, lastError: 'gave up' })
-      .where(eq(outbox.id, row.id))
+    await db.outbox.updateOne({ _id: row._id }, { $set: { attempts: MAX_ATTEMPTS, lastError: 'gave up' } })
 
-    await retryNow(db, row.id)
+    await retryNow(db, row._id)
 
     const { impl } = recordingFetch(() => new Response('', { status: 200 }))
     const result = await drainOutbox(db, { ...CONFIG, fetchImpl: impl })
@@ -222,7 +225,7 @@ describe('draining', () => {
     const { impl } = recordingFetch(() => new Response('', { status: 200 }))
     await drainOutbox(db, { ...CONFIG, fetchImpl: impl })
 
-    await retryNow(db, row.id)
+    await retryNow(db, row._id)
 
     const after = await drainOutbox(db, { ...CONFIG, fetchImpl: impl })
     assert.equal(after.attempted, 0)
@@ -253,6 +256,25 @@ describe('draining', () => {
 
     assert.equal(calls.length, 2)
   })
+
+  test('claiming does not double-deliver under two concurrent workers', async () => {
+    for (let index = 0; index < 6; index += 1) await queue(`concurrent.${index}`)
+
+    const { impl, calls } = recordingFetch(() => new Response('', { status: 200 }))
+
+    // Two "workers" draining at once. Each event must be claimed by exactly
+    // one of them -- this is what the lease in claimDue (domain/webhooks.ts)
+    // exists to guarantee, in place of Postgres's FOR UPDATE SKIP LOCKED.
+    const [a, b] = await Promise.all([
+      drainOutbox(db, { ...CONFIG, fetchImpl: impl }),
+      drainOutbox(db, { ...CONFIG, fetchImpl: impl }),
+    ])
+
+    assert.equal(a.attempted + b.attempted, 6)
+    assert.equal(calls.length, 6)
+    const delivered = await db.outbox.countDocuments({ deliveredAt: { $ne: null } })
+    assert.equal(delivered, 6)
+  })
 })
 
 describe('summary', () => {
@@ -261,11 +283,8 @@ describe('summary', () => {
     const dead = await queue('dead.one')
     await queue('pending.one')
 
-    await db
-      .update(outbox)
-      .set({ deliveredAt: new Date() })
-      .where(eq(outbox.id, delivered.id))
-    await db.update(outbox).set({ attempts: MAX_ATTEMPTS }).where(eq(outbox.id, dead.id))
+    await db.outbox.updateOne({ _id: delivered._id }, { $set: { deliveredAt: new Date() } })
+    await db.outbox.updateOne({ _id: dead._id }, { $set: { attempts: MAX_ATTEMPTS } })
 
     const summary = await outboxSummary(db)
 

@@ -18,37 +18,45 @@
  * you pass --force, because there is no undo.
  */
 import { config as loadEnv } from 'dotenv'
-import postgres from 'postgres'
-import { drizzle } from 'drizzle-orm/postgres-js'
-import { eq } from 'drizzle-orm'
-import * as schema from '@/db/schema'
-import { documents, entities, items, parties } from '@/db/schema'
+import { MongoClient } from 'mongodb'
+import { newId } from '@/db/ids'
+import { makeStore, type PartySnapshot } from '@/db/collections'
 import { priceDocument, resolveSupplyKind } from '@/domain/pricing'
 import { parseMinor } from '@/domain/money'
-import { postInvoice, postPayment, replaceDocumentLines } from '@/domain/posting'
+import { buildDocumentLines, postInvoice, postPayment } from '@/domain/posting'
+import { withTransaction } from '@/db/client'
 
 loadEnv({ path: ['.env.local', '.env'], quiet: true })
 
 const ACTOR = { email: 'admin@acme.test' }
 
 async function main() {
-  const client = postgres(process.env.DATABASE_URL!, { max: 1 })
-  const db = drizzle(client, { schema })
+  const uri = process.env.MONGODB_URI
+  if (!uri) throw new Error('Missing MONGODB_URI.')
 
-  const [org] = await db.select().from(entities).limit(1)
-  if (!org) throw new Error('No entity yet. Run `npm run setup` first.')
+  const client = new MongoClient(uri)
+  await client.connect()
+  const store = makeStore(client.db(), client)
+
+  const orgOrNull = await store.entities.findOne({})
+  if (!orgOrNull) throw new Error('No entity yet. Run `npm run setup` first.')
+  // Reassigned to a new binding rather than used as `orgOrNull` everywhere:
+  // TypeScript's null-narrowing does not survive into a closure defined later
+  // in the same scope, so the closures below (`draft`, `pay`) need a binding
+  // whose type already excludes null, not a narrowed check on the original one.
+  const org = orgOrNull
 
   // Seeding on top of existing documents would duplicate clients and push the
   // invoice numbering somewhere confusing. Refuse rather than make a mess.
-  const existing = await db.select({ id: documents.id }).from(documents).limit(1)
-  if (existing.length > 0 && !process.argv.includes('--force')) {
+  const existing = await store.documents.findOne({}, { projection: { _id: 1 } })
+  if (existing && !process.argv.includes('--force')) {
     console.error(
       'This database already has documents in it. Demo data is meant for an empty one.\n' +
         'Re-run with --force if you are sure, or start clean:\n' +
         '  rm -rf .devdb && npm run dev:db   (in another terminal)\n' +
         '  npm run setup -- --email ... --password ...',
     )
-    await client.end({ timeout: 5 })
+    await client.close()
     process.exit(1)
   }
 
@@ -63,16 +71,23 @@ async function main() {
 
   const partyIds: Record<string, string> = {}
   for (const c of CLIENTS) {
-    const [row] = await db.insert(parties).values({
-      entityId: org.id,
+    const id = newId()
+    await store.parties.insertOne({
+      _id: id,
+      entityId: org._id,
       name: c.name,
+      isCustomer: true,
+      isVendor: false,
       gstin: c.gstin,
       stateCode: c.stateCode,
       email: c.email,
       phone: c.phone,
       billingAddress: { line1: c.line1, line2: '', city: c.city, state: '', postalCode: c.postalCode, country: 'India' },
-    }).returning()
-    partyIds[c.name] = row.id
+      notes: '',
+      isActive: true,
+      createdAt: new Date(),
+    })
+    partyIds[c.name] = id
   }
   console.log(`clients: ${CLIENTS.length}`)
 
@@ -89,26 +104,30 @@ async function main() {
 
   const itemIds: Record<string, string> = {}
   for (const i of ITEMS) {
-    // Mapped column by column rather than spread. `...i` compiled cleanly --
-    // excess property checks do not apply through a spread -- and silently
-    // inserted nothing for the price and rate, leaving every item at zero.
-    const [row] = await db
-      .insert(items)
-      .values({
-        entityId: org.id,
-        name: i.name,
-        description: i.description,
-        hsnSac: i.hsnSac,
-        unit: i.unit,
-        unitPriceMinor: parseMinor(i.unitPrice),
-        defaultTaxRatePercent: i.taxRatePercent,
-      })
-      .returning()
-    itemIds[i.name] = row.id
+    const id = newId()
+    // Mapped field by field rather than spread, on purpose: a spread of a
+    // loosely-typed literal into an insert is exactly how the previous version
+    // of this script silently dropped the price and tax rate on every item —
+    // excess properties are not checked through a spread, so a typo in a field
+    // name compiles cleanly and inserts nothing for it.
+    await store.items.insertOne({
+      _id: id,
+      entityId: org._id,
+      name: i.name,
+      description: i.description,
+      hsnSac: i.hsnSac,
+      unit: i.unit,
+      unitPriceMinor: parseMinor(i.unitPrice),
+      defaultTaxRatePercent: i.taxRatePercent,
+      incomeAccountId: null,
+      isActive: true,
+      createdAt: new Date(),
+    })
+    itemIds[i.name] = id
   }
 
-  const zeroPriced = await db.select().from(items).where(eq(items.unitPriceMinor, 0))
-  if (zeroPriced.length > 0) throw new Error(`${zeroPriced.length} items seeded with no price`)
+  const zeroPriced = await store.items.countDocuments({ entityId: org._id, unitPriceMinor: 0 })
+  if (zeroPriced > 0) throw new Error(`${zeroPriced} items seeded with no price`)
 
   console.log(`items: ${ITEMS.length}`)
 
@@ -122,7 +141,8 @@ async function main() {
     lines: Array<{ item: string; quantity: string }>
     discountValue?: string
   }) {
-    const party = (await db.select().from(parties).where(eq(parties.id, partyIds[opts.party])).limit(1))[0]
+    const party = await store.parties.findOne({ _id: partyIds[opts.party] })
+    if (!party) throw new Error(`Unknown party ${opts.party}`)
     const supplyKind = resolveSupplyKind(org.stateCode, party.stateCode)
 
     const resolved = opts.lines.map((l) => {
@@ -142,63 +162,112 @@ async function main() {
       supplyKind,
     })
 
-    const [doc] = await db.insert(documents).values({
-      entityId: org.id,
+    const partySnapshot: PartySnapshot = {
+      name: party.name, email: party.email, phone: party.phone,
+      gstin: party.gstin, stateCode: party.stateCode,
+      address: [party.billingAddress.line1, party.billingAddress.city, party.billingAddress.postalCode, 'India'].filter(Boolean).join(', '),
+    }
+
+    const id = newId()
+    const now = new Date()
+    await store.documents.insertOne({
+      _id: id,
+      entityId: org._id,
       docType: opts.docType ?? 'invoice',
-      partyId: party.id,
-      partySnapshot: {
-        name: party.name, email: party.email, phone: party.phone,
-        gstin: party.gstin, stateCode: party.stateCode,
-        address: [party.billingAddress.line1, party.billingAddress.city, party.billingAddress.postalCode, 'India'].filter(Boolean).join(', '),
-      },
+      docNumber: null,
+      status: 'draft',
+      partyId: party._id,
+      partySnapshot,
       issueDate: opts.issueDate,
       dueDate: opts.dueDate,
+      currency: 'INR',
+      fxRate: '1',
       subtotalMinor: priced.subtotalMinor,
       discountMinor: priced.discountMinor,
       taxMinor: priced.taxMinor,
       totalMinor: priced.totalMinor,
+      allocatedMinor: 0,
       discountType: 'fixed',
       discountValue: opts.discountValue ?? '0',
       supplyKind,
       placeOfSupply: party.stateCode,
+      correctsDocumentId: opts.correctsDocumentId ?? null,
       notes: opts.notes ?? '',
       terms: 'Payment due within 30 days. Interest at 1.5% per month on overdue amounts.',
-      correctsDocumentId: opts.correctsDocumentId ?? null,
-    }).returning()
+      irn: null,
+      ackNo: null,
+      ackDate: null,
+      signedQrCode: null,
+      postedAt: null,
+      postedBy: null,
+      voidedAt: null,
+      lines: buildDocumentLines(
+        resolved.map((l, index) => ({
+          lineNo: index + 1,
+          itemId: itemIds[l.name],
+          description: l.name,
+          hsnSac: l.hsnSac,
+          unit: l.unit,
+          quantity: l.quantity,
+          unitPriceMinor: parseMinor(l.unitPrice),
+          taxRatePercent: l.taxRatePercent,
+          ...priced.lines[index],
+        })),
+      ),
+      createdAt: now,
+      updatedAt: now,
+    })
 
-    await replaceDocumentLines(db, doc.id, resolved.map((l, index) => ({
-      lineNo: index + 1,
-      itemId: itemIds[l.name],
-      description: l.name,
-      hsnSac: l.hsnSac,
-      unit: l.unit,
-      quantity: l.quantity,
-      unitPriceMinor: parseMinor(l.unitPrice),
-      taxRatePercent: l.taxRatePercent,
-      ...priced.lines[index],
-    })))
-
-    return doc.id
+    return id
   }
 
-  const post = (id: string) => db.transaction(async (tx) => postInvoice(tx, id, ACTOR))
+  const post = (id: string) => withTransaction(store, (tx) => postInvoice(tx, id, ACTOR))
 
   async function pay(party: string, issueDate: string, amount: string, against: string, reference: string) {
-    const p = (await db.select().from(parties).where(eq(parties.id, partyIds[party])).limit(1))[0]
+    const p = await store.parties.findOne({ _id: partyIds[party] })
+    if (!p) throw new Error(`Unknown party ${party}`)
     const minor = parseMinor(amount)
-    const [doc] = await db.insert(documents).values({
-      entityId: org.id,
+    const id = newId()
+    const now = new Date()
+    const partySnapshot: PartySnapshot = { name: p.name, email: p.email, phone: p.phone, gstin: p.gstin, stateCode: p.stateCode, address: '' }
+
+    await store.documents.insertOne({
+      _id: id,
+      entityId: org._id,
       docType: 'payment',
-      partyId: p.id,
-      partySnapshot: { name: p.name, email: p.email, phone: p.phone, gstin: p.gstin, stateCode: p.stateCode, address: '' },
+      docNumber: null,
+      status: 'draft',
+      partyId: p._id,
+      partySnapshot,
       issueDate,
+      dueDate: null,
+      currency: 'INR',
+      fxRate: '1',
       subtotalMinor: minor,
+      discountMinor: 0,
+      taxMinor: 0,
       totalMinor: minor,
+      allocatedMinor: 0,
+      discountType: 'fixed',
+      discountValue: '0',
+      supplyKind: 'exempt',
+      placeOfSupply: '',
+      correctsDocumentId: null,
       notes: reference,
-    }).returning()
-    await db.transaction(async (tx) =>
-      postPayment(tx, doc.id, [{ documentId: against, amountMinor: minor }], ACTOR),
-    )
+      terms: '',
+      irn: null,
+      ackNo: null,
+      ackDate: null,
+      signedQrCode: null,
+      postedAt: null,
+      postedBy: null,
+      voidedAt: null,
+      lines: [],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await withTransaction(store, (tx) => postPayment(tx, id, [{ documentId: against, amountMinor: minor }], ACTOR))
   }
 
   // ---- the story ---------------------------------------------------------
@@ -276,14 +345,19 @@ async function main() {
     'ZGVtby1zaWduYXR1cmUtbm90LWEtcmVhbC1JUlAtcmVzcG9uc2U',
   ].join('.')
 
-  await db.update(documents).set({
-    irn, ackNo: '112026081700419', ackDate: '2026-07-27 14:06:00', signedQrCode: qr, updatedAt: new Date(),
-  }).where(eq(documents.id, g))
+  await store.documents.updateOne(
+    { _id: g },
+    { $set: { irn, ackNo: '112026081700419', ackDate: '2026-07-27 14:06:00', signedQrCode: qr, updatedAt: new Date() } },
+  )
 
-  const all = await db.select().from(documents)
-  console.log(`documents: ${all.length} (${all.filter((x) => x.status === 'draft').length} draft)`)
+  const all = await store.documents.countDocuments({ entityId: org._id })
+  const drafts = await store.documents.countDocuments({ entityId: org._id, status: 'draft' })
+  console.log(`documents: ${all} (${drafts} draft)`)
 
-  await client.end({ timeout: 5 })
+  await client.close()
 }
 
-main()
+main().catch((error) => {
+  console.error(error)
+  process.exit(1)
+})

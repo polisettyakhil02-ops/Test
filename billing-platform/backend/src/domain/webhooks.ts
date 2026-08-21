@@ -1,7 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm'
-import { outbox } from '@/db/schema'
-import type { Db } from '@/domain/posting'
+import type { Store } from '@/db/collections'
 
 /**
  * Outbox delivery.
@@ -97,17 +95,25 @@ export interface DrainResult {
 /**
  * Claims due events and POSTs them.
  *
- * `FOR UPDATE SKIP LOCKED` is what makes it safe to run more than one worker:
- * a row being delivered by one is invisible to the others rather than delivered
- * twice in the same instant.
+ * MongoDB has nothing like `FOR UPDATE SKIP LOCKED`, so claiming works
+ * differently: each row is claimed one at a time with `findOneAndUpdate`,
+ * which atomically advances `nextAttemptAt` into a short lease window as part
+ * of the same operation that selects the row. A second worker's query for "due
+ * now" no longer matches that row the instant the first worker claims it —
+ * there is no window where two workers can see the same row as available,
+ * because there is only ever one atomic operation deciding it, never a select
+ * followed by a separate lock. If a worker crashes mid-delivery, the lease
+ * simply expires and the row becomes claimable again, which `FOR UPDATE`
+ * inside a short-lived transaction did not need to think about, but a queue
+ * with workers that can be killed does.
  */
-export async function drainOutbox(db: Db, options: DrainOptions): Promise<DrainResult> {
+export async function drainOutbox(store: Store, options: DrainOptions): Promise<DrainResult> {
   const now = options.now ?? new Date()
   const limit = options.limit ?? 25
   const fetchImpl = options.fetchImpl ?? fetch
   const result: DrainResult = { attempted: 0, delivered: 0, failed: 0, failures: [] }
 
-  const due = await claimDue(db, { now, limit })
+  const due = await claimDue(store, { now, limit })
   if (due.length === 0) return result
 
   for (const event of due) {
@@ -126,24 +132,26 @@ export async function drainOutbox(db: Db, options: DrainOptions): Promise<DrainR
         throw new Error(`${response.status} ${response.statusText}`.trim())
       }
 
-      await db
-        .update(outbox)
-        .set({ deliveredAt: now, attempts: event.attempts + 1, lastError: '' })
-        .where(eq(outbox.id, event.id))
+      await store.outbox.updateOne(
+        { _id: event.id },
+        { $set: { deliveredAt: now, attempts: event.attempts + 1, lastError: '' } },
+      )
 
       result.delivered += 1
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const attempts = event.attempts + 1
 
-      await db
-        .update(outbox)
-        .set({
-          attempts,
-          lastError: message.slice(0, 500),
-          nextAttemptAt: new Date(now.getTime() + backoffSeconds(attempts) * 1000),
-        })
-        .where(eq(outbox.id, event.id))
+      await store.outbox.updateOne(
+        { _id: event.id },
+        {
+          $set: {
+            attempts,
+            lastError: message.slice(0, 500),
+            nextAttemptAt: new Date(now.getTime() + backoffSeconds(attempts) * 1000),
+          },
+        },
+      )
 
       result.failed += 1
       result.failures.push({ id: event.id, error: message })
@@ -182,28 +190,24 @@ async function postEvent(
   }
 }
 
-async function claimDue(db: Db, options: { now: Date; limit: number }): Promise<OutboxEvent[]> {
-  const rows = await db
-    .select()
-    .from(outbox)
-    .where(
-      and(
-        isNull(outbox.deliveredAt),
-        lte(outbox.nextAttemptAt, options.now),
-        sql`${outbox.attempts} < ${MAX_ATTEMPTS}`,
-      ),
-    )
-    .orderBy(asc(outbox.createdAt))
-    .limit(options.limit)
-    .for('update', { skipLocked: true })
+/** How far into the future a claim reserves a row before it is retryable again. */
+const CLAIM_LEASE_MS = 60_000
 
-  return rows.map((row: typeof outbox.$inferSelect) => ({
-    id: row.id,
-    topic: row.topic,
-    payload: row.payload,
-    createdAt: row.createdAt,
-    attempts: row.attempts,
-  }))
+async function claimDue(store: Store, options: { now: Date; limit: number }): Promise<OutboxEvent[]> {
+  const claimed: OutboxEvent[] = []
+
+  for (let i = 0; i < options.limit; i += 1) {
+    const row = await store.outbox.findOneAndUpdate(
+      { deliveredAt: null, nextAttemptAt: { $lte: options.now }, attempts: { $lt: MAX_ATTEMPTS } },
+      { $set: { nextAttemptAt: new Date(options.now.getTime() + CLAIM_LEASE_MS) } },
+      { sort: { createdAt: 1 }, returnDocument: 'after' },
+    )
+    if (!row) break
+
+    claimed.push({ id: row._id, topic: row.topic, payload: row.payload, createdAt: row.createdAt, attempts: row.attempts })
+  }
+
+  return claimed
 }
 
 export interface OutboxSummary {
@@ -214,28 +218,62 @@ export interface OutboxSummary {
 }
 
 /** Counts for the outbox screen. */
-export async function outboxSummary(db: Db): Promise<OutboxSummary> {
-  const [row] = await db
-    .select({
-      pending: sql<string>`COUNT(*) FILTER (WHERE ${outbox.deliveredAt} IS NULL AND ${outbox.attempts} < ${MAX_ATTEMPTS})`,
-      delivered: sql<string>`COUNT(*) FILTER (WHERE ${outbox.deliveredAt} IS NOT NULL)`,
-      dead: sql<string>`COUNT(*) FILTER (WHERE ${outbox.deliveredAt} IS NULL AND ${outbox.attempts} >= ${MAX_ATTEMPTS})`,
-      oldest: sql<Date | null>`MIN(${outbox.createdAt}) FILTER (WHERE ${outbox.deliveredAt} IS NULL)`,
-    })
-    .from(outbox)
+export async function outboxSummary(store: Store): Promise<OutboxSummary> {
+  const FAR_FUTURE = new Date('9999-12-31T00:00:00Z')
+
+  const [row] = await store.outbox
+    .aggregate<{ pending: number; delivered: number; dead: number; oldestOrSentinel: Date }>(
+      [
+        {
+          $group: {
+            _id: null,
+            pending: {
+              $sum: {
+                $cond: [
+                  { $and: [{ $eq: ['$deliveredAt', null] }, { $lt: ['$attempts', MAX_ATTEMPTS] }] },
+                  1,
+                  0,
+                ],
+              },
+            },
+            delivered: { $sum: { $cond: [{ $ne: ['$deliveredAt', null] }, 1, 0] } },
+            dead: {
+              $sum: {
+                $cond: [
+                  { $and: [{ $eq: ['$deliveredAt', null] }, { $gte: ['$attempts', MAX_ATTEMPTS] }] },
+                  1,
+                  0,
+                ],
+              },
+            },
+            // A sentinel far in the future stands in for "delivered" rows, so
+            // $min never has to compare a real date against null — BSON orders
+            // null below every date, which would otherwise always win.
+            oldestOrSentinel: {
+              $min: { $cond: [{ $eq: ['$deliveredAt', null] }, '$createdAt', FAR_FUTURE] },
+            },
+          },
+        },
+      ],
+      { session: store.session },
+    )
+    .toArray()
+
+  const pending = row?.pending ?? 0
 
   return {
-    pending: Number(row?.pending ?? 0),
-    delivered: Number(row?.delivered ?? 0),
-    deadLettered: Number(row?.dead ?? 0),
-    oldestPendingAt: row?.oldest ? new Date(row.oldest) : null,
+    pending,
+    delivered: row?.delivered ?? 0,
+    deadLettered: row?.dead ?? 0,
+    oldestPendingAt: pending > 0 && row ? row.oldestOrSentinel : null,
   }
 }
 
 /** Puts a dead-lettered or scheduled event back at the front of the queue. */
-export async function retryNow(db: Db, id: string, now: Date = new Date()) {
-  await db
-    .update(outbox)
-    .set({ attempts: 0, nextAttemptAt: now, lastError: '' })
-    .where(and(eq(outbox.id, id), isNull(outbox.deliveredAt)))
+export async function retryNow(store: Store, id: string, now: Date = new Date()): Promise<void> {
+  await store.outbox.updateOne(
+    { _id: id, deliveredAt: null },
+    { $set: { attempts: 0, nextAttemptAt: now, lastError: '' } },
+    { session: store.session },
+  )
 }

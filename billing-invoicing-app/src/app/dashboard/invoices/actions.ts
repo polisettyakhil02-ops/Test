@@ -2,9 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { and, eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { documents, entities, parties } from '@/db/schema'
+import { getDb, withTransaction } from '@/db'
+import { newId } from '@/db/ids'
+import type { DocumentDoc, PartySnapshot } from '@/db/collections'
 import { requireRole } from '@/lib/session'
 import {
   invoiceSchema,
@@ -17,11 +17,11 @@ import { parseMinor } from '@/domain/money'
 import { priceDocument, resolveSupplyKind } from '@/domain/pricing'
 import {
   PostingError,
+  buildDocumentLines,
   openBalanceMinor,
   postInvoice,
   postPayment,
   recordAudit,
-  replaceDocumentLines,
   reverseDocument,
 } from '@/domain/posting'
 import { formatAddress } from '@/lib/dto'
@@ -47,26 +47,17 @@ function parseInvoiceForm(formData: FormData) {
   })
 }
 
-/** Prices a draft and writes it, header and lines together. */
+/** Prices a draft into a full document — header and lines together, one write. */
 async function saveDraft(
-  session: { entityId: string; userId: string; email: string },
+  session: { entityId: string },
   input: InvoiceInput,
   options: { documentId?: string; docType: 'invoice' | 'credit_note'; correctsDocumentId?: string },
-) {
-  const [party] = await db
-    .select()
-    .from(parties)
-    .where(and(eq(parties.entityId, session.entityId), eq(parties.id, input.partyId)))
-    .limit(1)
-
+): Promise<string> {
+  const store = await getDb()
+  const party = await store.parties.findOne({ _id: input.partyId, entityId: session.entityId })
   if (!party) throw new Error('That client no longer exists.')
 
-  const [org] = await db
-    .select()
-    .from(entities)
-    .where(eq(entities.id, session.entityId))
-    .limit(1)
-
+  const org = await store.entities.findOne({ _id: session.entityId })
   const supplyKind = resolveSupplyKind(org?.stateCode ?? '', party.stateCode)
 
   const priced = priceDocument({
@@ -81,62 +72,95 @@ async function saveDraft(
     supplyKind,
   })
 
-  const header = {
+  const partySnapshot: PartySnapshot = {
+    name: party.name,
+    email: party.email,
+    phone: party.phone,
+    gstin: party.gstin,
+    stateCode: party.stateCode,
+    address: formatAddress(party.billingAddress),
+  }
+
+  const lines = buildDocumentLines(
+    input.lines.map((line, index) => ({
+      lineNo: index + 1,
+      itemId: line.itemId ?? null,
+      description: line.description,
+      hsnSac: line.hsnSac,
+      unit: line.unit || 'unit',
+      quantity: line.quantity,
+      unitPriceMinor: parseMinor(line.unitPrice),
+      taxRatePercent: line.taxRatePercent,
+      ...priced.lines[index],
+    })),
+  )
+
+  if (options.documentId) {
+    await store.documents.updateOne(
+      { _id: options.documentId },
+      {
+        $set: {
+          partyId: party._id,
+          partySnapshot,
+          issueDate: input.issueDate,
+          dueDate: input.dueDate || null,
+          subtotalMinor: priced.subtotalMinor,
+          discountMinor: priced.discountMinor,
+          taxMinor: priced.taxMinor,
+          totalMinor: priced.totalMinor,
+          discountType: input.discountType,
+          discountValue: input.discountValue,
+          supplyKind,
+          placeOfSupply: party.stateCode,
+          notes: input.notes,
+          terms: input.terms,
+          lines,
+          updatedAt: new Date(),
+        },
+      },
+    )
+    return options.documentId
+  }
+
+  const id = newId()
+  const now = new Date()
+  const doc: DocumentDoc = {
+    _id: id,
     entityId: session.entityId,
     docType: options.docType,
-    partyId: party.id,
-    partySnapshot: {
-      name: party.name,
-      email: party.email,
-      phone: party.phone,
-      gstin: party.gstin,
-      stateCode: party.stateCode,
-      address: formatAddress(party.billingAddress),
-    },
+    docNumber: null,
+    status: 'draft',
+    partyId: party._id,
+    partySnapshot,
     issueDate: input.issueDate,
     dueDate: input.dueDate || null,
+    currency: 'INR',
+    fxRate: '1',
     subtotalMinor: priced.subtotalMinor,
     discountMinor: priced.discountMinor,
     taxMinor: priced.taxMinor,
     totalMinor: priced.totalMinor,
+    allocatedMinor: 0,
     discountType: input.discountType,
     discountValue: input.discountValue,
     supplyKind,
     placeOfSupply: party.stateCode,
+    correctsDocumentId: options.correctsDocumentId ?? null,
     notes: input.notes,
     terms: input.terms,
-    correctsDocumentId: options.correctsDocumentId ?? null,
-    updatedAt: new Date(),
+    irn: null,
+    ackNo: null,
+    ackDate: null,
+    signedQrCode: null,
+    postedAt: null,
+    postedBy: null,
+    voidedAt: null,
+    lines,
+    createdAt: now,
+    updatedAt: now,
   }
-
-  return db.transaction(async (tx) => {
-    let documentId = options.documentId
-
-    if (documentId) {
-      await tx.update(documents).set(header).where(eq(documents.id, documentId))
-    } else {
-      const [created] = await tx.insert(documents).values(header).returning()
-      documentId = created.id
-    }
-
-    await replaceDocumentLines(
-      tx,
-      documentId,
-      input.lines.map((line, index) => ({
-        lineNo: index + 1,
-        itemId: line.itemId ?? null,
-        description: line.description,
-        hsnSac: line.hsnSac,
-        unit: line.unit || 'unit',
-        quantity: line.quantity,
-        unitPriceMinor: parseMinor(line.unitPrice),
-        taxRatePercent: line.taxRatePercent,
-        ...priced.lines[index],
-      })),
-    )
-
-    return documentId
-  })
+  await store.documents.insertOne(doc)
+  return id
 }
 
 export async function createInvoice(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -173,11 +197,8 @@ export async function updateInvoice(
     return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
   }
 
-  const [existing] = await db
-    .select()
-    .from(documents)
-    .where(and(eq(documents.entityId, session.entityId), eq(documents.id, documentId)))
-    .limit(1)
+  const store = await getDb()
+  const existing = await store.documents.findOne({ _id: documentId, entityId: session.entityId })
 
   if (!existing) return { error: 'That document no longer exists.', fieldErrors: {} }
   if (existing.status !== 'draft') {
@@ -207,7 +228,8 @@ export async function postDocument(documentId: string): Promise<DeleteResult> {
   const session = await requireRole('accountant')
 
   try {
-    const result = await db.transaction(async (tx) =>
+    const store = await getDb()
+    const result = await withTransaction(store, (tx) =>
       postInvoice(tx, documentId, { id: session.userId, email: session.email }),
     )
     revalidatePath('/dashboard')
@@ -224,7 +246,8 @@ export async function voidDocument(documentId: string): Promise<DeleteResult> {
   const session = await requireRole('admin')
 
   try {
-    await db.transaction(async (tx) =>
+    const store = await getDb()
+    await withTransaction(store, (tx) =>
       reverseDocument(tx, documentId, { id: session.userId, email: session.email }),
     )
     revalidatePath('/dashboard')
@@ -241,17 +264,18 @@ export async function deleteDraft(documentId: string): Promise<DeleteResult> {
   const session = await requireRole('accountant')
 
   try {
-    // The database refuses this for anything not a draft, so there is no way to
-    // delete a posted document even by mistake.
-    await db
-      .delete(documents)
-      .where(and(eq(documents.entityId, session.entityId), eq(documents.id, documentId)))
-  } catch (error) {
-    const cause = (error as { cause?: { message?: string } })?.cause
-    return {
-      ok: false,
-      message: cause?.message ?? (error instanceof Error ? error.message : 'Could not delete.'),
+    const store = await getDb()
+    const existing = await store.documents.findOne({ _id: documentId, entityId: session.entityId })
+    if (!existing) return { ok: false, message: 'That document no longer exists.' }
+    // A posted document is refused here, in application code -- the same place
+    // every other write to a posted document is refused. MongoDB has no
+    // trigger to fall back on the way the Postgres version did.
+    if (existing.status !== 'draft') {
+      return { ok: false, message: 'A posted document cannot be deleted. Void it instead.' }
     }
+    await store.documents.deleteOne({ _id: documentId, entityId: session.entityId })
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not delete.' }
   }
 
   revalidatePath('/dashboard/invoices')
@@ -261,10 +285,10 @@ export async function deleteDraft(documentId: string): Promise<DeleteResult> {
 /**
  * Stamps a posted invoice with what the IRP returned.
  *
- * The database allows this exact update and nothing else on a posted document:
- * write-once, and no other column may ride along with it. See the
- * `refuse_posted_document_edit` guard — the rule is enforced there rather than
- * here, so a future code path cannot get it wrong.
+ * This is the one field set a posted document accepts, and application code is
+ * what enforces that -- see the comment on `postInvoice` in
+ * `domain/posting.ts` for why MongoDB itself cannot the way the Postgres
+ * `refuse_posted_document_edit` guard did.
  */
 export async function recordIrn(
   documentId: string,
@@ -284,11 +308,8 @@ export async function recordIrn(
     return { error: 'Please fix the highlighted fields.', fieldErrors: fieldErrors(parsed.error) }
   }
 
-  const [existing] = await db
-    .select()
-    .from(documents)
-    .where(and(eq(documents.entityId, session.entityId), eq(documents.id, documentId)))
-    .limit(1)
+  const store = await getDb()
+  const existing = await store.documents.findOne({ _id: documentId, entityId: session.entityId })
 
   if (!existing) return { error: 'That document no longer exists.', fieldErrors: {} }
   if (existing.status !== 'posted') {
@@ -302,17 +323,20 @@ export async function recordIrn(
   }
 
   try {
-    await db.transaction(async (tx) => {
-      await tx
-        .update(documents)
-        .set({
-          irn: parsed.data.irn,
-          ackNo: parsed.data.ackNo,
-          ackDate: parsed.data.ackDate,
-          signedQrCode: parsed.data.signedQrCode,
-          updatedAt: new Date(),
-        })
-        .where(eq(documents.id, documentId))
+    await withTransaction(store, async (tx) => {
+      await tx.documents.updateOne(
+        { _id: documentId },
+        {
+          $set: {
+            irn: parsed.data.irn,
+            ackNo: parsed.data.ackNo,
+            ackDate: parsed.data.ackDate,
+            signedQrCode: parsed.data.signedQrCode,
+            updatedAt: new Date(),
+          },
+        },
+        { session: tx.session },
+      )
 
       await recordAudit(tx, {
         entityId: session.entityId,
@@ -325,9 +349,8 @@ export async function recordIrn(
       })
     })
   } catch (error) {
-    const cause = (error as { cause?: { message?: string } })?.cause
     return {
-      error: cause?.message ?? (error instanceof Error ? error.message : 'Could not record.'),
+      error: error instanceof Error ? error.message : 'Could not record.',
       fieldErrors: {},
     }
   }
@@ -374,18 +397,16 @@ export async function recordPayment(_prev: FormState, formData: FormData): Promi
   }
 
   try {
-    const [party] = await db
-      .select()
-      .from(parties)
-      .where(and(eq(parties.entityId, session.entityId), eq(parties.id, parsed.data.partyId)))
-      .limit(1)
-
+    const store = await getDb()
+    const party = await store.parties.findOne({ _id: parsed.data.partyId, entityId: session.entityId })
     if (!party) return { error: 'That client no longer exists.', fieldErrors: {} }
 
     // Each allocation is capped at what the invoice still owes, so a stale form
-    // cannot over-settle a document someone else just paid.
+    // cannot over-settle a document someone else just paid. The transactional
+    // allocation guard in `domain/posting.ts` is the real enforcement; this is
+    // just a friendlier error than the generic one it would otherwise throw.
     for (const target of targets) {
-      const open = await openBalanceMinor(db, target.documentId)
+      const open = await openBalanceMinor(store, target.documentId)
       if (target.amountMinor > open) {
         return {
           error: 'One of those invoices has already been settled. Reload and try again.',
@@ -394,38 +415,63 @@ export async function recordPayment(_prev: FormState, formData: FormData): Promi
       }
     }
 
-    await db.transaction(async (tx) => {
-      const [payment] = await tx
-        .insert(documents)
-        .values({
+    const paymentId = newId()
+    const partySnapshot: PartySnapshot = {
+      name: party.name,
+      email: party.email,
+      phone: party.phone,
+      gstin: party.gstin,
+      stateCode: party.stateCode,
+      address: formatAddress(party.billingAddress),
+    }
+
+    await withTransaction(store, async (tx) => {
+      const now = new Date()
+      await tx.documents.insertOne(
+        {
+          _id: paymentId,
           entityId: session.entityId,
           docType: 'payment',
-          partyId: party.id,
-          partySnapshot: {
-            name: party.name,
-            email: party.email,
-            phone: party.phone,
-            gstin: party.gstin,
-            stateCode: party.stateCode,
-            address: formatAddress(party.billingAddress),
-          },
+          docNumber: null,
+          status: 'draft',
+          partyId: party._id,
+          partySnapshot,
           issueDate: parsed.data.issueDate,
-          totalMinor: amountMinor,
+          dueDate: null,
+          currency: 'INR',
+          fxRate: '1',
           subtotalMinor: amountMinor,
+          discountMinor: 0,
+          taxMinor: 0,
+          totalMinor: amountMinor,
+          allocatedMinor: 0,
+          discountType: 'fixed',
+          discountValue: '0',
+          supplyKind: 'exempt',
+          placeOfSupply: '',
+          correctsDocumentId: null,
           notes: parsed.data.reference,
-        })
-        .returning()
+          terms: '',
+          irn: null,
+          ackNo: null,
+          ackDate: null,
+          signedQrCode: null,
+          postedAt: null,
+          postedBy: null,
+          voidedAt: null,
+          lines: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+        { session: tx.session },
+      )
 
-      await postPayment(tx, payment.id, targets, {
-        id: session.userId,
-        email: session.email,
-      })
+      await postPayment(tx, paymentId, targets, { id: session.userId, email: session.email })
     })
   } catch (error) {
     if (error instanceof PostingError) return { error: error.message, fieldErrors: {} }
-    const cause = (error as { cause?: { message?: string } })?.cause
     return {
-      error: cause?.message ?? (error instanceof Error ? error.message : 'Could not record.'),
+      error: error instanceof Error ? error.message : 'Could not record.',
       fieldErrors: {},
     }
   }

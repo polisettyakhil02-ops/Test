@@ -59,10 +59,29 @@ export function handler<T extends Request>(
   }
 }
 
-interface DriverError {
-  code?: string
-  constraint?: string
-  message?: string
+/**
+ * The two MongoDB server error codes a business rule can surface as. 11000 is
+ * a unique-index violation (a duplicate email, a document number already
+ * taken); 121 is a document-validator rejection (an unbalanced journal entry,
+ * a posted document with no number — see db/indexes.ts). Both are the
+ * database refusing a write for a reason a human should see, not a server
+ * fault, so both come back as a 409 with a message written for a person rather
+ * than the driver's own wording, which quotes the raw document back at you.
+ */
+const DUPLICATE_KEY = 11000
+const VALIDATION_FAILED = 121
+
+function friendlyMongoMessage(error: { code?: number; keyPattern?: Record<string, unknown> }): string | null {
+  if (error.code === DUPLICATE_KEY) {
+    const field = Object.keys(error.keyPattern ?? {})[0]
+    return field
+      ? `That ${field === 'email' ? 'email address' : field} is already in use.`
+      : 'That value is already in use.'
+  }
+  if (error.code === VALIDATION_FAILED) {
+    return 'That change would leave the record in an invalid state and was refused.'
+  }
+  return null
 }
 
 export function errorMiddleware(
@@ -87,12 +106,9 @@ export function errorMiddleware(
     return
   }
 
-  // Drizzle wraps driver errors; the useful detail is on `cause`. A trigger
-  // firing is a business rule being enforced, so it comes back as a 409 with
-  // the database's own message, which is written for a human.
-  const cause = (error as { cause?: DriverError })?.cause
-  if (cause?.code === 'restrict_violation' || cause?.code === 'check_violation' || cause?.constraint) {
-    res.status(409).json({ error: cause.message ?? 'That change was refused.', fieldErrors: {} })
+  const mongoMessage = friendlyMongoMessage(error as { code?: number; keyPattern?: Record<string, unknown> })
+  if (mongoMessage) {
+    res.status(409).json({ error: mongoMessage, fieldErrors: {} })
     return
   }
 

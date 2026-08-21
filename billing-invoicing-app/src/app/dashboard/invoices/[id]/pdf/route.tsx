@@ -1,7 +1,5 @@
 import { renderToBuffer } from '@react-pdf/renderer'
-import { eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { entities } from '@/db/schema'
+import { getDb } from '@/db'
 import { requireSession } from '@/lib/session'
 import { getDocument } from '@/lib/queries'
 import { qrDataUrl } from '@/lib/qr'
@@ -22,11 +20,8 @@ export async function GET(
   const found = await getDocument(session.entityId, id)
   if (!found) return new Response('Not found', { status: 404 })
 
-  const [org] = await db
-    .select()
-    .from(entities)
-    .where(eq(entities.id, session.entityId))
-    .limit(1)
+  const store = await getDb()
+  const org = await store.entities.findOne({ _id: session.entityId })
 
   const qr = found.doc.signedQrCode ? await qrDataUrl(found.doc.signedQrCode, 300) : null
 

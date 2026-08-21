@@ -1,5 +1,5 @@
-import { sql } from 'drizzle-orm'
-import { ACCOUNT_CODES, type Db } from '@/domain/posting'
+import { ACCOUNT_CODES } from '@/domain/posting'
+import type { Store } from '@/db/collections'
 import type { Minor } from '@/domain/money'
 
 /**
@@ -38,6 +38,19 @@ export interface Statement {
   rows: StatementRow[]
 }
 
+interface MovementRow {
+  entryId: string
+  entryDate: string
+  postedAt: Date
+  sourceType: string
+  sourceId: string | null
+  memo: string
+  docNumber: string | null
+  debitMinor: number
+  creditMinor: number
+  lineNo: number
+}
+
 /**
  * Movements on one party's receivable account between two dates.
  *
@@ -45,67 +58,75 @@ export interface Statement {
  * id, so a future expense or vendor posting tagged with the same party cannot
  * leak into what is meant to be a receivables statement.
  */
+async function movements(
+  store: Store,
+  entityId: string,
+  partyId: string,
+  match: Record<string, unknown>,
+): Promise<MovementRow[]> {
+  return store.journalEntries
+    .aggregate<MovementRow>(
+      [
+        { $match: { entityId, 'lines.partyId': partyId, ...match } },
+        { $unwind: '$lines' },
+        { $match: { 'lines.partyId': partyId } },
+        { $lookup: { from: 'accounts', localField: 'lines.accountId', foreignField: '_id', as: 'account' } },
+        { $unwind: '$account' },
+        { $match: { 'account.code': ACCOUNT_CODES.receivable } },
+        { $lookup: { from: 'documents', localField: 'sourceId', foreignField: '_id', as: 'doc' } },
+        {
+          $project: {
+            _id: 0,
+            entryId: '$_id',
+            entryDate: 1,
+            postedAt: 1,
+            sourceType: 1,
+            sourceId: 1,
+            memo: 1,
+            docNumber: { $ifNull: [{ $arrayElemAt: ['$doc.docNumber', 0] }, null] },
+            debitMinor: '$lines.debitMinor',
+            creditMinor: '$lines.creditMinor',
+            lineNo: '$lines.lineNo',
+          },
+        },
+        { $sort: { entryDate: 1, postedAt: 1, lineNo: 1 } },
+      ],
+      { session: store.session },
+    )
+    .toArray()
+}
+
 export async function customerStatement(
-  db: Db,
+  store: Store,
   entityId: string,
   partyId: string,
   period: { from: string; to: string },
 ): Promise<Statement> {
-  const opening = await db.execute(sql`
-    SELECT COALESCE(SUM(jl.debit_minor), 0) - COALESCE(SUM(jl.credit_minor), 0) AS balance
-      FROM journal_lines jl
-      JOIN journal_entries je ON je.id = jl.entry_id
-      JOIN accounts a        ON a.id = jl.account_id
-     WHERE je.entity_id = ${entityId}
-       AND jl.party_id  = ${partyId}
-       AND a.code       = ${ACCOUNT_CODES.receivable}
-       AND je.entry_date < ${period.from}
-  `).then(unwrap)
+  const before = await movements(store, entityId, partyId, { entryDate: { $lt: period.from } })
+  const openingMinor = before.reduce((sum, row) => sum + (row.debitMinor - row.creditMinor), 0)
 
-  const movements: Array<Record<string, unknown>> = await db
-    .execute(sql`
-      SELECT je.id            AS entry_id,
-             je.entry_date,
-             je.source_type,
-             je.source_id,
-             je.memo,
-             d.doc_number,
-             jl.debit_minor,
-             jl.credit_minor
-        FROM journal_lines jl
-        JOIN journal_entries je ON je.id = jl.entry_id
-        JOIN accounts a         ON a.id = jl.account_id
-        LEFT JOIN documents d   ON d.id = je.source_id
-       WHERE je.entity_id = ${entityId}
-         AND jl.party_id  = ${partyId}
-         AND a.code       = ${ACCOUNT_CODES.receivable}
-         AND je.entry_date >= ${period.from}
-         AND je.entry_date <= ${period.to}
-       ORDER BY je.entry_date, je.posted_at, jl.line_no
-    `)
-    .then(rowsOf)
+  const inPeriod = await movements(store, entityId, partyId, {
+    entryDate: { $gte: period.from, $lte: period.to },
+  })
 
-  let running = Number(opening?.balance ?? 0)
-  const openingMinor = running
+  let running = openingMinor
   let chargedMinor = 0
   let settledMinor = 0
 
-  const rows: StatementRow[] = movements.map((row) => {
-    const debitMinor = Number(row.debit_minor)
-    const creditMinor = Number(row.credit_minor)
-    running += debitMinor - creditMinor
-    chargedMinor += debitMinor
-    settledMinor += creditMinor
+  const rows: StatementRow[] = inPeriod.map((row) => {
+    running += row.debitMinor - row.creditMinor
+    chargedMinor += row.debitMinor
+    settledMinor += row.creditMinor
 
     return {
-      entryId: String(row.entry_id),
-      date: String(row.entry_date),
-      sourceType: String(row.source_type),
-      documentId: (row.source_id as string | null) ?? null,
-      docNumber: (row.doc_number as string | null) ?? null,
-      memo: String(row.memo ?? ''),
-      debitMinor,
-      creditMinor,
+      entryId: row.entryId,
+      date: row.entryDate,
+      sourceType: row.sourceType,
+      documentId: row.sourceId,
+      docNumber: row.docNumber,
+      memo: row.memo ?? '',
+      debitMinor: row.debitMinor,
+      creditMinor: row.creditMinor,
       balanceMinor: running,
     }
   })
@@ -119,16 +140,6 @@ export async function customerStatement(
     settledMinor,
     rows,
   }
-}
-
-/** postgres-js returns an array; pglite returns { rows }. */
-function rowsOf(result: unknown): Array<Record<string, unknown>> {
-  const maybe = result as { rows?: Array<Record<string, unknown>> }
-  return (maybe?.rows ?? (result as Array<Record<string, unknown>>)) ?? []
-}
-
-function unwrap(result: unknown): Record<string, unknown> | undefined {
-  return rowsOf(result)[0]
 }
 
 /** The statement as CSV, for emailing to a customer who wants the detail. */

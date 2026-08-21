@@ -1,8 +1,7 @@
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
-import { sql } from 'drizzle-orm'
-import { closeDb, db } from '@/db'
+import { closeDb, getDb } from '@/db'
 import { config } from '@/lib/config'
 import { errorMiddleware, handler } from '@/lib/errors'
 import { withSession } from '@/middleware/auth'
@@ -54,7 +53,8 @@ export function createApp() {
     '/api/health',
     handler(async (_req, res) => {
       try {
-        await db.execute(sql`SELECT 1`)
+        const store = await getDb()
+        await store.client.db().command({ ping: 1 })
         res.set('Cache-Control', 'no-store').json({ status: 'ok' })
       } catch {
         res.status(503).set('Cache-Control', 'no-store').json({

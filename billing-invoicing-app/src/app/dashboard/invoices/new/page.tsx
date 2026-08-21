@@ -1,8 +1,6 @@
 import Link from 'next/link'
 import { ArrowLeft, Users } from 'lucide-react'
-import { eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { entities } from '@/db/schema'
+import { getDb } from '@/db'
 import { requireRole } from '@/lib/session'
 import { allItems, allParties, getDocument } from '@/lib/queries'
 import { InvoiceForm } from '@/app/dashboard/invoices/invoice-form'
@@ -18,10 +16,11 @@ export default async function NewInvoicePage(props: PageProps<'/dashboard/invoic
   const docType = params.docType === 'credit_note' ? 'credit_note' : 'invoice'
   const corrects = typeof params.corrects === 'string' ? params.corrects : undefined
 
-  const [parties, items, [org]] = await Promise.all([
+  const store = await getDb()
+  const [parties, items, org] = await Promise.all([
     allParties(session.entityId),
     allItems(session.entityId),
-    db.select().from(entities).where(eq(entities.id, session.entityId)).limit(1),
+    store.entities.findOne({ _id: session.entityId }),
   ])
 
   // A credit note starts as a copy of the invoice it corrects.

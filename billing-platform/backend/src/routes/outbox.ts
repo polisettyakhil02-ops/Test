@@ -1,10 +1,9 @@
 import { Router } from 'express'
-import { desc } from 'drizzle-orm'
-import { db } from '@/db'
-import { outbox } from '@/db/schema'
+import { getDb } from '@/db'
 import { config } from '@/lib/config'
 import { badRequest, handler, param } from '@/lib/errors'
 import { MAX_ATTEMPTS, drainOutbox, outboxSummary, retryNow } from '@/domain/webhooks'
+import { withId } from '@/lib/serialize'
 import { requireAuth, requireRole, sessionOf } from '@/middleware/auth'
 
 export const outboxRoutes = Router()
@@ -14,12 +13,13 @@ outboxRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     sessionOf(req)
-    const rows = await db.select().from(outbox).orderBy(desc(outbox.createdAt)).limit(100)
+    const store = await getDb()
+    const rows = await store.outbox.find({}).sort({ createdAt: -1 }).limit(100).toArray()
     res.json({
-      summary: await outboxSummary(db),
+      summary: await outboxSummary(store),
       configured: Boolean(config.webhook.endpoint && config.webhook.secret),
       maxAttempts: MAX_ATTEMPTS,
-      rows,
+      rows: rows.map(withId),
     })
   }),
 )
@@ -39,7 +39,8 @@ outboxRoutes.post(
       throw badRequest('Set WEBHOOK_ENDPOINT and WEBHOOK_SECRET before delivering.')
     }
 
-    const result = await drainOutbox(db, {
+    const store = await getDb()
+    const result = await drainOutbox(store, {
       endpoint: config.webhook.endpoint,
       secret: config.webhook.secret,
     })
@@ -52,7 +53,8 @@ outboxRoutes.post(
   requireRole('admin'),
   handler(async (req, res) => {
     sessionOf(req)
-    await retryNow(db, param(req, 'id'))
+    const store = await getDb()
+    await retryNow(store, param(req, 'id'))
     res.json({ ok: true })
   }),
 )

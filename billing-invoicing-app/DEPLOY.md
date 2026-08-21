@@ -2,13 +2,22 @@
 
 There is no separate front end and back end to deploy. This is one Next.js
 application: the pages, the Server Actions that write to the database, and the
-PDF and CSV route handlers all run in the same process. You deploy **one thing**,
-and it needs **one thing** alongside it — a PostgreSQL database.
+PDF and CSV route handlers all run in the same process. You deploy **one
+thing**, pointed at a MongoDB Atlas cluster.
 
 ```
-      your domain                  one container                 one database
-  billing.yourco.com  ──TLS──▶  Caddy / nginx  ──▶  app :3000  ──▶  PostgreSQL
+      your domain                  one container              MongoDB Atlas
+  billing.yourco.com  ──TLS──▶  Caddy / nginx  ──▶  app :3000  ──▶  (managed replica set)
 ```
+
+## Why Atlas and not a database container
+
+This application posts every document inside a multi-document transaction, and
+MongoDB refuses transactions outright on a standalone server — it has to be a
+replica set. Atlas clusters already are one; a self-hosted alternative needs
+you to run and maintain that yourself (see the end of this document if you
+want to anyway). For a solo developer's billing system, a free Atlas M0
+cluster is the path of least maintenance.
 
 ## What you need
 
@@ -16,6 +25,24 @@ and it needs **one thing** alongside it — a PostgreSQL database.
   is enough for a single-tenant billing system)
 - A domain name pointed at it
 - Docker with the Compose plugin
+- A MongoDB Atlas cluster (see below)
+
+## MongoDB Atlas, first
+
+1. [cloud.mongodb.com](https://cloud.mongodb.com) → create a project → Build a
+   Database → **M0** (free) is enough to start.
+2. Database Access → Add New Database User. Generate a password; do not reuse
+   one from elsewhere.
+3. Network Access → Add IP Address. For a VPS with a static IP, add exactly
+   that IP. For a dynamic one, `0.0.0.0/0` is the pragmatic choice — the
+   database user's password is what actually stands between the internet and
+   your data, so make it a strong, generated one.
+4. Cluster → Connect → Drivers → copy the `mongodb+srv://` URI, fill in the
+   password, and add a database name before the `?`:
+   ```
+   mongodb+srv://billing:REDACTED@cluster0.xxxxx.mongodb.net/billing?retryWrites=true&w=majority
+   ```
+   That whole string is `MONGODB_URI`.
 
 ## The short version
 
@@ -28,7 +55,7 @@ Fill in three values in `.env`:
 
 | Variable | What to put |
 |---|---|
-| `POSTGRES_PASSWORD` | Any long random string. Compose builds `DATABASE_URL` from it. |
+| `MONGODB_URI` | Your Atlas connection string, from above |
 | `AUTH_SECRET` | `npx auth secret`, or `openssl rand -base64 32` |
 | `AUTH_URL` | Your public URL, e.g. `https://billing.yourco.com` |
 
@@ -102,25 +129,30 @@ git pull
 docker compose up -d --build
 ```
 
-Migrations run automatically before the server starts, in one transaction each,
-and record what they have applied — so a restart that has nothing to do is a
-no-op, and a half-applied schema change cannot happen.
+Indexes and validators are ensured automatically before the server starts on
+every boot. There is no migration ledger to fall behind on — `ensureIndexes`
+either creates something or confirms it already matches, every time — so a
+restart that has nothing to do is a genuine no-op.
 
 ## Backups
 
-Everything that matters is in PostgreSQL. Nothing is stored on the app's disk.
+Everything that matters is in MongoDB. Nothing is stored on the app's disk.
+
+Atlas takes backups for you automatically on M10 and above. The free M0 tier
+does not include them, so if you are running real books on it, either upgrade
+or export on a schedule yourself:
 
 ```bash
 # Take one
-docker compose exec -T db pg_dump -U billing billing | gzip > billing-$(date +%F).sql.gz
+mongodump --uri="$MONGODB_URI" --archive=billing-$(date +%F).gz --gzip
 
 # Put one back
-gunzip -c billing-2026-08-17.sql.gz | docker compose exec -T db psql -U billing billing
+mongorestore --uri="$MONGODB_URI" --archive=billing-2026-08-17.gz --gzip
 ```
 
-Put that first line in cron. A billing system whose ledger you cannot restore is
-a liability, and the tax authority does not accept "the disk failed" as an
-explanation for missing invoices.
+Put the first line in cron if you are on M0. A billing system whose ledger you
+cannot restore is a liability, and the tax authority does not accept "the disk
+failed" as an explanation for missing invoices.
 
 ## Outbound events (optional)
 
@@ -150,8 +182,8 @@ npm ci
 npm run build            # produces .next/standalone
 npm run build:scripts    # bundles the migration and setup scripts
 
-DATABASE_URL=... npm run migrate
-DATABASE_URL=... AUTH_SECRET=... AUTH_URL=https://... node .next/standalone/server.js
+MONGODB_URI=... npm run migrate
+MONGODB_URI=... AUTH_SECRET=... AUTH_URL=https://... node .next/standalone/server.js
 ```
 
 Copy `.next/static` to `.next/standalone/.next/static` and `public` to
@@ -160,16 +192,38 @@ their build locations. Run it under systemd or pm2 so it restarts on reboot.
 
 ## A managed platform instead
 
-The app is a standard Next.js server, so Vercel, Railway, Render or Fly all work
-without changes. You still need a PostgreSQL instance (Neon, Supabase, RDS —
-anything that gives you a connection string), and you still need to set
-`DATABASE_URL`, `AUTH_SECRET` and `AUTH_URL`, and to run `npm run migrate` and
-the setup script once against that database.
+The app is a standard Next.js server, so Vercel, Railway, Render or Fly all
+work without changes. You still need `MONGODB_URI`, `AUTH_SECRET` and
+`AUTH_URL` set, and you still need to run `npm run migrate` and the setup
+script once against that database.
 
 The one thing to check on a serverless platform is the connection pool:
 `DATABASE_POOL_MAX` defaults to 10 per instance, which many instances multiply
-into more connections than a small Postgres will accept. Lower it, or put
-PgBouncer in between.
+into more connections than a small Atlas tier will accept. Lower it if you are
+on M0/M2/M5.
+
+## Self-hosting MongoDB instead of Atlas
+
+Possible, and the official image makes it short, but it is more you now have
+to operate — backups, upgrades, and the one thing Atlas does for you that is
+easy to get wrong by hand: actually being a replica set. A single `mongod`
+container is not one, and this application's transactions do not work at all
+without it.
+
+```bash
+docker run -d --name billing-mongo \
+  -v billing-mongo-data:/data/db \
+  -p 127.0.0.1:27017:27017 \
+  mongo:7 --replSet rs0
+
+# One-time: tell it to be a (single-node) replica set.
+docker exec billing-mongo mongosh --eval "rs.initiate()"
+```
+
+Then `MONGODB_URI=mongodb://127.0.0.1:27017/billing?replicaSet=rs0`. This is
+not wired into `docker-compose.yml` because `rs.initiate()` is a one-time step
+Compose has no clean way to express as a health check — run it once by hand,
+and it stays initiated across restarts as long as the volume persists.
 
 ## Before you invoice a real customer
 
@@ -177,6 +231,8 @@ PgBouncer in between.
 - [ ] `AUTH_URL` is your real https URL
 - [ ] Your GSTIN, address with PIN code, and bank details are set — check with
       `docker compose run --rm app node dist-scripts/entity.cjs`
-- [ ] The database port is not published to the internet (compose does not)
-- [ ] A backup has been taken *and* restored once, so you know it works
+- [ ] The Atlas database user's password is generated, not reused, and Network
+      Access is not wider than it needs to be
+- [ ] A backup exists — Atlas does this for you on M10+; on the free tier, you
+      have run `mongodump` at least once *and restored it*, so you know it works
 - [ ] You have raised one test invoice, posted it, and checked the PDF

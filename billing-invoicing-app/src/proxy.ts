@@ -7,8 +7,9 @@ import { authConfig } from '@/auth.config'
 // same behavior, current filename. See:
 // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md
 //
-// Instantiated from `auth.config` (no Mongoose, no bcrypt) so that protecting a
-// route stays a JWT signature check and never opens a database connection.
+// Instantiated from `auth.config` (no MongoDB client, no bcrypt) so that
+// protecting a route stays a JWT signature check and never opens a database
+// connection.
 const { auth } = NextAuth(authConfig)
 
 export default auth((req) => {

@@ -1,10 +1,10 @@
 import { test, describe, before } from 'node:test'
 import assert from 'node:assert/strict'
-import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '@/db/testing'
-import { documents, parties } from '@/db/schema'
+import { withTransaction } from '@/db/client'
+import { newId } from '@/db/ids'
 import { seedEntity } from '@/domain/seed'
-import { postInvoice, postPayment, replaceDocumentLines, reverseDocument } from '@/domain/posting'
+import { buildDocumentLines, postInvoice, postPayment, reverseDocument } from '@/domain/posting'
 import { priceDocument } from '@/domain/pricing'
 import { partyBalanceMinor } from '@/domain/reports'
 import { customerStatement, statementToCsv } from '@/domain/statements'
@@ -20,91 +20,139 @@ let entityId: string
 let partyId: string
 let otherPartyId: string
 
-async function invoiceFor(
-  party: string,
-  options: { total: number; issueDate: string; dueDate?: string },
-) {
+const SNAPSHOT = { name: 'Globex', email: '', phone: '', gstin: '', stateCode: '29', address: '' }
+
+async function invoiceFor(party: string, options: { total: number; issueDate: string; dueDate?: string }) {
   const priced = priceDocument({
-    lines: [
-      { description: 'Consulting', quantity: '1', unitPriceMinor: options.total, taxRatePercent: '0' },
-    ],
+    lines: [{ description: 'Consulting', quantity: '1', unitPriceMinor: options.total, taxRatePercent: '0' }],
     discountType: 'fixed',
     discountValue: '0',
     supplyKind: 'intra_state',
   })
 
-  const [doc] = await db
-    .insert(documents)
-    .values({
-      entityId,
-      docType: 'invoice',
-      partyId: party,
-      partySnapshot: { name: 'Globex', email: '', phone: '', gstin: '', stateCode: '29', address: '' },
-      issueDate: options.issueDate,
-      dueDate: options.dueDate ?? null,
-      subtotalMinor: priced.subtotalMinor,
-      taxMinor: priced.taxMinor,
-      totalMinor: priced.totalMinor,
-    })
-    .returning()
+  const id = newId()
+  const now = new Date()
+  await db.documents.insertOne({
+    _id: id,
+    entityId,
+    docType: 'invoice',
+    docNumber: null,
+    status: 'draft',
+    partyId: party,
+    partySnapshot: SNAPSHOT,
+    issueDate: options.issueDate,
+    dueDate: options.dueDate ?? null,
+    currency: 'INR',
+    fxRate: '1',
+    subtotalMinor: priced.subtotalMinor,
+    discountMinor: 0,
+    taxMinor: priced.taxMinor,
+    totalMinor: priced.totalMinor,
+    allocatedMinor: 0,
+    discountType: 'fixed',
+    discountValue: '0',
+    supplyKind: 'intra_state',
+    placeOfSupply: '',
+    correctsDocumentId: null,
+    notes: '',
+    terms: '',
+    irn: null,
+    ackNo: null,
+    ackDate: null,
+    signedQrCode: null,
+    postedAt: null,
+    postedBy: null,
+    voidedAt: null,
+    lines: buildDocumentLines([
+      {
+        lineNo: 1,
+        description: 'Consulting',
+        hsnSac: '',
+        unit: 'unit',
+        quantity: '1',
+        unitPriceMinor: options.total,
+        taxRatePercent: '0',
+        ...priced.lines[0],
+      },
+    ]),
+    createdAt: now,
+    updatedAt: now,
+  })
 
-  await replaceDocumentLines(db, doc.id, [
-    {
-      lineNo: 1,
-      description: 'Consulting',
-      hsnSac: '',
-      unit: 'unit',
-      quantity: '1',
-      unitPriceMinor: options.total,
-      taxRatePercent: '0',
-      ...priced.lines[0],
-    },
-  ])
-
-  const posted = await db.transaction(async (tx) => postInvoice(tx, doc.id))
-  return { id: doc.id, number: posted.number }
+  const posted = await withTransaction(db, (tx) => postInvoice(tx, id))
+  return { id, number: posted.number }
 }
 
-async function paymentFor(
-  party: string,
-  options: { amount: number; issueDate: string; against: string },
-) {
-  const [doc] = await db
-    .insert(documents)
-    .values({
-      entityId,
-      docType: 'payment',
-      partyId: party,
-      partySnapshot: { name: 'Globex', email: '', phone: '', gstin: '', stateCode: '29', address: '' },
-      issueDate: options.issueDate,
-      subtotalMinor: options.amount,
-      totalMinor: options.amount,
-    })
-    .returning()
+async function paymentFor(party: string, options: { amount: number; issueDate: string; against: string }) {
+  const id = newId()
+  const now = new Date()
+  await db.documents.insertOne({
+    _id: id,
+    entityId,
+    docType: 'payment',
+    docNumber: null,
+    status: 'draft',
+    partyId: party,
+    partySnapshot: SNAPSHOT,
+    issueDate: options.issueDate,
+    dueDate: null,
+    currency: 'INR',
+    fxRate: '1',
+    subtotalMinor: options.amount,
+    discountMinor: 0,
+    taxMinor: 0,
+    totalMinor: options.amount,
+    allocatedMinor: 0,
+    discountType: 'fixed',
+    discountValue: '0',
+    supplyKind: 'exempt',
+    placeOfSupply: '',
+    correctsDocumentId: null,
+    notes: '',
+    terms: '',
+    irn: null,
+    ackNo: null,
+    ackDate: null,
+    signedQrCode: null,
+    postedAt: null,
+    postedBy: null,
+    voidedAt: null,
+    lines: [],
+    createdAt: now,
+    updatedAt: now,
+  })
 
-  await db.transaction(async (tx) =>
-    postPayment(tx, doc.id, [{ documentId: options.against, amountMinor: options.amount }]),
-  )
+  await withTransaction(db, (tx) => postPayment(tx, id, [{ documentId: options.against, amountMinor: options.amount }]))
+  return id
+}
 
-  return doc.id
+async function makeParty(name: string) {
+  const id = newId()
+  await db.parties.insertOne({
+    _id: id,
+    entityId,
+    name,
+    isCustomer: true,
+    isVendor: false,
+    email: '',
+    phone: '',
+    gstin: '',
+    stateCode: '29',
+    billingAddress: { line1: '', line2: '', city: '', state: '', postalCode: '', country: 'India' },
+    notes: '',
+    isActive: true,
+    createdAt: new Date(),
+  })
+  return id
 }
 
 before(async () => {
   db = await createTestDb()
   const entity = await seedEntity(db, { name: 'Acme Consulting', stateCode: '29', startYear: 2026 })
-  entityId = entity.id
+  entityId = entity._id
 
-  const [party] = await db
-    .insert(parties)
-    .values({ entityId, name: 'Globex', stateCode: '29' })
-    .returning()
-  partyId = party.id
-
-  const [other] = await db
-    .insert(parties)
-    .values({ entityId, name: 'Initech', stateCode: '29' })
-    .returning()
-  otherPartyId = other.id
+  partyId = await makeParty('Globex')
+  otherPartyId = await makeParty('Initech')
 
   const may = await invoiceFor(partyId, { total: 100_00, issueDate: '2026-05-10' })
   await paymentFor(partyId, { amount: 40_00, issueDate: '2026-05-20', against: may.id })
@@ -118,20 +166,13 @@ before(async () => {
 
 describe('customer statement', () => {
   test('the opening balance is everything before the period', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-08-01',
-      to: '2026-08-31',
-    })
-
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-08-01', to: '2026-08-31' })
     // May: charged 100.00, paid 40.00.
     assert.equal(statement.openingMinor, 60_00)
   })
 
   test('the closing balance equals the ledger balance for that party', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-01-01',
-      to: '2026-12-31',
-    })
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-01-01', to: '2026-12-31' })
 
     const fromLedger = await partyBalanceMinor(db, entityId, partyId)
     assert.equal(statement.closingMinor, fromLedger)
@@ -139,31 +180,17 @@ describe('customer statement', () => {
   })
 
   test('opening + charges - payments = closing, on any window', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-08-01',
-      to: '2026-08-31',
-    })
-
-    assert.equal(
-      statement.openingMinor + statement.chargedMinor - statement.settledMinor,
-      statement.closingMinor,
-    )
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-08-01', to: '2026-08-31' })
+    assert.equal(statement.openingMinor + statement.chargedMinor - statement.settledMinor, statement.closingMinor)
   })
 
   test('the running balance on the last row is the closing balance', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-08-01',
-      to: '2026-08-31',
-    })
-
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-08-01', to: '2026-08-31' })
     assert.equal(statement.rows.at(-1)?.balanceMinor, statement.closingMinor)
   })
 
   test('rows carry the document number and are in date order', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-08-01',
-      to: '2026-08-31',
-    })
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-08-01', to: '2026-08-31' })
 
     assert.equal(statement.rows.length, 2)
     assert.equal(statement.rows[0].debitMinor, 250_00)
@@ -176,23 +203,12 @@ describe('customer statement', () => {
   })
 
   test("another customer's documents never appear", async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-01-01',
-      to: '2026-12-31',
-    })
-
-    assert.equal(
-      statement.rows.some((row) => row.debitMinor === 999_00),
-      false,
-    )
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-01-01', to: '2026-12-31' })
+    assert.equal(statement.rows.some((row) => row.debitMinor === 999_00), false)
   })
 
   test('a period with no movement still reports the right balances', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-06-01',
-      to: '2026-06-30',
-    })
-
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-06-01', to: '2026-06-30' })
     assert.equal(statement.rows.length, 0)
     assert.equal(statement.openingMinor, 60_00)
     assert.equal(statement.closingMinor, 60_00)
@@ -200,12 +216,9 @@ describe('customer statement', () => {
 
   test('voiding an invoice shows up as a movement, not as a deletion', async () => {
     const doomed = await invoiceFor(otherPartyId, { total: 500_00, issueDate: '2026-09-10' })
-    await db.transaction(async (tx) => reverseDocument(tx, doomed.id))
+    await withTransaction(db, (tx) => reverseDocument(tx, doomed.id))
 
-    const statement = await customerStatement(db, entityId, otherPartyId, {
-      from: '2026-09-01',
-      to: '2026-09-30',
-    })
+    const statement = await customerStatement(db, entityId, otherPartyId, { from: '2026-09-01', to: '2026-09-30' })
 
     // Both the original charge and its reversal are on the statement, and they
     // net to nothing -- the ledger records that it happened and was undone.
@@ -214,18 +227,14 @@ describe('customer statement', () => {
     assert.equal(statement.settledMinor, 500_00)
     assert.equal(statement.closingMinor, statement.openingMinor)
 
-    const [doc] = await db.select().from(documents).where(eq(documents.id, doomed.id))
-    assert.equal(doc.status, 'voided')
+    const doc = await db.documents.findOne({ _id: doomed.id })
+    assert.equal(doc?.status, 'voided')
   })
 })
 
 describe('statement CSV', () => {
   test('carries the opening and closing balances as their own rows', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-08-01',
-      to: '2026-08-31',
-    })
-
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-08-01', to: '2026-08-31' })
     const csv = statementToCsv(statement, 'Globex')
 
     assert.match(csv, /Opening balance,,,60\.00/)
@@ -234,11 +243,7 @@ describe('statement CSV', () => {
   })
 
   test('a comma in the customer name cannot break the layout', async () => {
-    const statement = await customerStatement(db, entityId, partyId, {
-      from: '2026-08-01',
-      to: '2026-08-31',
-    })
-
+    const statement = await customerStatement(db, entityId, partyId, { from: '2026-08-01', to: '2026-08-31' })
     assert.match(statementToCsv(statement, 'Globex, Inc.'), /"Globex, Inc\."/)
   })
 })

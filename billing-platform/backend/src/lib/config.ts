@@ -23,7 +23,7 @@ const isProduction = process.env.NODE_ENV === 'production'
 export const config = {
   isProduction,
   port: Number(process.env.PORT ?? 4000),
-  databaseUrl: required('DATABASE_URL'),
+  mongodbUri: required('MONGODB_URI'),
 
   /** Signs the session token. Changing it signs everyone out. */
   jwtSecret: required('JWT_SECRET'),

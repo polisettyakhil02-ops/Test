@@ -1,10 +1,10 @@
 # Publishes the browser app to GitHub Pages.
 #
 # Pages serves static files only, so this deploys the front end alone — the API
-# and the database have to run somewhere that can hold a connection to
-# PostgreSQL. Set the repository variable API_URL to that API's public HTTPS
-# origin (Settings → Secrets and variables → Actions → Variables), and on the
-# API set COOKIE_CROSS_SITE=true and add this Pages origin to CORS_ORIGINS.
+# has to run somewhere that can hold a connection to MongoDB Atlas. Set the
+# repository variable API_URL to that API's public HTTPS origin
+# (Settings → Secrets and variables → Actions → Variables), and on the API set
+# COOKIE_CROSS_SITE=true and add this Pages origin to CORS_ORIGINS.
 #
 # Both sides must be HTTPS: a cross-site session cookie needs SameSite=None,
 # and browsers refuse SameSite=None over plain HTTP.

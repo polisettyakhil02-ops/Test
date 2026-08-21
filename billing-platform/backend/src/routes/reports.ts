@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { handler, notFound, param } from '@/lib/errors'
 import { ageingReport, dashboardTotals, trialBalance } from '@/domain/reports'
 import { buildGstr1, gstr1ToCsv } from '@/domain/gst-returns'
@@ -25,10 +25,11 @@ reportRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
+    const store = await getDb()
     const asOf = today()
     const [totals, ageing] = [
-      await dashboardTotals(db, session.entityId, asOf),
-      await ageingReport(db, session.entityId, asOf),
+      await dashboardTotals(store, session.entityId, asOf),
+      await ageingReport(store, session.entityId, asOf),
     ]
     res.json({ asOf, totals, ageing })
   }),
@@ -39,8 +40,9 @@ reportRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
+    const store = await getDb()
     const asOf = today()
-    res.json({ asOf, rows: await ageingReport(db, session.entityId, asOf) })
+    res.json({ asOf, rows: await ageingReport(store, session.entityId, asOf) })
   }),
 )
 
@@ -49,7 +51,8 @@ reportRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    res.json(await trialBalance(db, session.entityId))
+    const store = await getDb()
+    res.json(await trialBalance(store, session.entityId))
   }),
 )
 
@@ -58,11 +61,12 @@ reportRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
+    const store = await getDb()
     const period = periodFrom(req.query as Record<string, unknown>, {
       from: startOfMonth(today()),
       to: endOfMonth(today()),
     })
-    const documents = await listReturnDocuments(session.entityId, period)
+    const documents = await listReturnDocuments(store, session.entityId, period)
     res.json(buildGstr1(documents, period))
   }),
 )
@@ -72,11 +76,12 @@ reportRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
+    const store = await getDb()
     const period = periodFrom(req.query as Record<string, unknown>, {
       from: startOfMonth(today()),
       to: endOfMonth(today()),
     })
-    const documents = await listReturnDocuments(session.entityId, period)
+    const documents = await listReturnDocuments(store, session.entityId, period)
 
     res
       .status(200)
@@ -92,12 +97,13 @@ reportRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const party = await getParty(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const party = await getParty(store, session.entityId, param(req, 'id'))
     if (!party) throw notFound('That client no longer exists.')
 
     const to = today()
     const period = periodFrom(req.query as Record<string, unknown>, { from: oneYearBefore(to), to })
-    const statement = await customerStatement(db, session.entityId, party.id, period)
+    const statement = await customerStatement(store, session.entityId, party.id, period)
     res.json({ party, statement })
   }),
 )
@@ -107,12 +113,13 @@ reportRoutes.get(
   requireAuth,
   handler(async (req, res) => {
     const session = sessionOf(req)
-    const party = await getParty(session.entityId, param(req, 'id'))
+    const store = await getDb()
+    const party = await getParty(store, session.entityId, param(req, 'id'))
     if (!party) throw notFound('That client no longer exists.')
 
     const to = today()
     const period = periodFrom(req.query as Record<string, unknown>, { from: oneYearBefore(to), to })
-    const statement = await customerStatement(db, session.entityId, party.id, period)
+    const statement = await customerStatement(store, session.entityId, party.id, period)
     const slug = party.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
     res

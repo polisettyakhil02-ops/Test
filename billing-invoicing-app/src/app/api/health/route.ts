@@ -1,5 +1,4 @@
-import { sql } from 'drizzle-orm'
-import { db } from '@/db'
+import { getDb } from '@/db'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -7,8 +6,8 @@ export const runtime = 'nodejs'
 /**
  * Liveness and readiness in one.
  *
- * It actually queries the database rather than just returning 200: a process
- * that is up but cannot reach PostgreSQL serves nothing but error pages, and a
+ * It actually pings the database rather than just returning 200: a process
+ * that is up but cannot reach MongoDB serves nothing but error pages, and a
  * health check that reports it healthy will keep it in the load balancer.
  *
  * Deliberately unauthenticated, and deliberately says nothing beyond up or
@@ -16,7 +15,8 @@ export const runtime = 'nodejs'
  */
 export async function GET() {
   try {
-    await db.execute(sql`SELECT 1`)
+    const store = await getDb()
+    await store.client.db().command({ ping: 1 })
     return Response.json({ status: 'ok' }, { headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return Response.json(

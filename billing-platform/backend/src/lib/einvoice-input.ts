@@ -1,6 +1,4 @@
-import { eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { entities, parties } from '@/db/schema'
+import { getDb } from '@/db'
 import { getDocument } from '@/lib/queries'
 import type { EinvoiceInput } from '@/domain/einvoice'
 
@@ -19,11 +17,12 @@ export async function einvoiceInputFor(
   entityId: string,
   documentId: string,
 ): Promise<{ input: EinvoiceInput; docNumber: string | null } | null> {
-  const found = await getDocument(entityId, documentId)
+  const store = await getDb()
+  const found = await getDocument(store, entityId, documentId)
   if (!found || found.doc.docType === 'payment') return null
 
-  const [org] = await db.select().from(entities).where(eq(entities.id, entityId)).limit(1)
-  const [party] = await db.select().from(parties).where(eq(parties.id, found.doc.partyId)).limit(1)
+  const org = await store.entities.findOne({ _id: entityId })
+  const party = await store.parties.findOne({ _id: found.doc.partyId })
 
   const address = party?.billingAddress
   const orgAddress = org?.addressLines ?? []

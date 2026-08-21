@@ -1,13 +1,13 @@
 # Billing &amp; Invoicing
 
-GST billing for a single Indian business, built as three separate deployables:
-a PostgreSQL database, an Express API, and a React browser app.
+GST billing for a single Indian business, built as separate deployables: a
+MongoDB database, an Express API, and a React browser app.
 
 Every figure the app shows is derived from a double-entry ledger. There is no
-"total" column anywhere that could disagree with the books — the dashboard, the
+"total" field anywhere that could disagree with the books — the dashboard, the
 ageing report, a customer's statement and the trial balance are four different
-queries over the same journal lines, and they cannot drift apart because there
-is nothing to drift.
+aggregations over the same journal lines, and they cannot drift apart because
+there is nothing to drift.
 
 ```
 browser  ──HTTPS──▶  frontend        (nginx serving a static bundle)
@@ -16,16 +16,20 @@ browser  ──HTTPS──▶  frontend        (nginx serving a static bundle)
                         ▼
                      backend         (Express, the ledger, PDF and CSV export)
                         │
-                        │  postgres://
+                        │  mongodb+srv://
                         ▼
-                     db              (PostgreSQL 17)
+                     MongoDB Atlas   (managed replica set)
 ```
 
-Each of the three directories is independently buildable and deployable. They
-talk over HTTP and a connection string, nothing else — so you can run all three
-with Compose on one box, or put the front end on GitHub Pages, the API on a
-container host and the database on a managed service, without changing a line
-of code.
+The front end and the API are each independently buildable and deployable —
+they talk over HTTP and a connection string, nothing else — so you can run
+both with Compose on one box, or put the front end on GitHub Pages and the API
+on a container host, without changing a line of code. The database is not a
+service this repo runs for you: Atlas is a managed replica set, which this
+application's transactions require, and standing up your own replica set is
+more operational surface than a solo developer setting up billing software
+needs to take on. `DEPLOY.md` covers self-hosting MongoDB anyway, for anyone
+who wants to.
 
 ---
 
@@ -35,7 +39,8 @@ of code.
 
 ```bash
 cp .env.example .env
-# Fill in POSTGRES_PASSWORD and JWT_SECRET. For the second:
+# Fill in MONGODB_URI (your Atlas connection string) and JWT_SECRET. For the
+# second:
 #   openssl rand -base64 48
 
 docker compose up -d --build
@@ -56,16 +61,20 @@ whether a given invoice is CGST + SGST or IGST, so it is worth getting right.
 
 ### Without Docker
 
-Three terminals. You need Node 22 and a PostgreSQL 13 or newer you can reach.
+Three terminals. You need Node 22 and a MongoDB replica set you can reach — a
+single `mongod` will not do, because this application posts every document
+inside a multi-document transaction, and MongoDB refuses transactions outright
+on a standalone server.
 
 ```bash
-# 1. Database — anything you like. If you have none to hand, the backend can
-#    run a real PostgreSQL server in-process:
+# 1. Database — an Atlas free tier cluster works, or if you have neither Atlas
+#    nor a local replica set to hand, the backend can run a real one:
 cd backend && npm install && npm run dev:db
+# prints MONGODB_URI=mongodb://127.0.0.1:27017/billing?replicaSet=rs0
 
 # 2. API
 cd backend
-cp .env.example .env          # set DATABASE_URL and JWT_SECRET
+cp .env.example .env          # set MONGODB_URI and JWT_SECRET
 npm run setup -- --email you@yourbusiness.com --password 'a-real-password' \
                  --company 'Your Business Pvt Ltd' --state 29
 npm run dev                   # :4000
@@ -123,36 +132,60 @@ HMAC-SHA256 signature and exponential backoff.
 ## Layout
 
 ```
-db/         PostgreSQL service. The schema lives in the backend's migrations.
 backend/    Express API, the ledger, reports, PDF and CSV export, CLI scripts.
 frontend/   React SPA. Vite build, nginx image, no server-side rendering.
 ```
 
 Each directory has its own `package.json`, its own `Dockerfile` and its own
-README where there is more to say. `docker-compose.yml` at the root wires the
-three together.
+README where there is more to say. `docker-compose.yml` at the root wires them
+together; the database is Atlas, reached over a connection string rather than
+run as a service here.
 
 ---
 
 ## Where the rules are enforced
 
-Not only in the application. The database refuses to hold a broken ledger:
+Mostly still in the database, though the honest answer changed shape when the
+database did. MongoDB has document validators and unique indexes, but nothing
+like a Postgres `BEFORE UPDATE` trigger that can compare a write against the
+row it replaces — a validator only ever sees the document being written, never
+the one before it. So:
 
-- a deferred constraint trigger checks that every journal entry balances at
-  commit time, so an unbalanced entry cannot be written by any client;
-- triggers refuse UPDATE and DELETE on posted documents and journal lines,
-  with one exception — the e-invoice stamp is write-once on an otherwise
-  unchanged row;
-- document numbers are allocated under `SELECT … FOR UPDATE`, so two concurrent
-  posts serialise instead of racing for the same number;
-- money is `bigint` paise throughout. No floats, anywhere, at any layer. The
-  browser receives integers and only ever formats them for display.
+- **A journal entry's lines always balance.** Each entry embeds its own lines
+  as an array, and a MongoDB document validator checks that
+  `sum(debits) == sum(credits)` on that one document at insert time — still
+  database-enforced, still holds for a write that skips the application
+  entirely, just expressed as one document's own arithmetic instead of a
+  cross-table trigger.
+- **An invoice can never be allocated for more than it is worth**, even under
+  two concurrent payments racing to settle it. `documents.allocatedMinor` is a
+  running total kept on the invoice itself specifically so this, too, can be a
+  validator (`allocatedMinor <= totalMinor`) rather than a check that would
+  need to look outside the document being written.
+- **Posted documents and journal entries are meant to be append-only** — but
+  this is the one guarantee that moved from "the database refuses it" to "the
+  application refuses it, and only application code ever writes here."
+  Nothing in MongoDB can reject an update for being disallowed based on the
+  document's *previous* state, so this now lives entirely in
+  `backend/src/domain/posting.ts`, the single code path every route goes
+  through. `backend/test/ledger.test.ts` tests the boundary of that
+  protection explicitly — including a test that shows a raw driver write
+  *can* bypass it — rather than assuming the guarantee still holds unchanged.
+- **Document numbers are gapless.** MongoDB has no row lock, so the Postgres
+  version's `SELECT … FOR UPDATE` becomes an atomic `findOneAndUpdate`
+  increment inside the posting transaction; a concurrent conflict aborts and
+  retries the whole posting rather than blocking on a lock.
+- **Money is an integer number of paise throughout.** No floats, anywhere, at
+  any layer. The browser receives integers and only ever formats them for
+  display.
 
-The test suite runs against real PostgreSQL in-process (PGlite), not a mock, so
-those triggers are the ones under test.
+The test suite runs against a real MongoDB replica set — `mongodb-memory-server`
+downloads a real `mongod` and runs it in-process, the same shape of thing
+PGlite did for Postgres — not a mock, so the validators above are the ones
+under test.
 
 ```bash
-cd backend && npm test        # 88 tests
+cd backend && npm test        # 92 tests
 ```
 
 ---
@@ -163,11 +196,11 @@ cd backend && npm test        # 88 tests
 
 | Where | How |
 | --- | --- |
-| One box, all three services | `docker compose up -d --build` |
+| API + front end on one box | `docker compose up -d --build`, `MONGODB_URI` pointed at Atlas |
 | Front end on GitHub Pages | The included workflow builds and deploys it; point `API_URL` at your API |
 | Front end on Netlify / Vercel / Cloudflare Pages | Build `frontend/` with `VITE_API_URL` set |
-| API on Fly / Railway / Render / any container host | Build `backend/Dockerfile`, set `DATABASE_URL` and `JWT_SECRET` |
-| Database on Neon / Supabase / RDS | Point `DATABASE_URL` at it and run `npm run migrate` |
+| API on Fly / Railway / Render / any container host | Build `backend/Dockerfile`, set `MONGODB_URI` and `JWT_SECRET` |
+| Database | MongoDB Atlas (a free M0 cluster is enough to start); self-hosting is covered in `DEPLOY.md` |
 
 The one thing worth reading before you split the front end and the API across
 different *sites*: the session is an httpOnly cookie, so you need

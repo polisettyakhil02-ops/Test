@@ -2,9 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { and, eq } from 'drizzle-orm'
-import { db } from '@/db'
-import { items } from '@/db/schema'
+import { getDb, withTransaction } from '@/db'
+import { newId } from '@/db/ids'
 import { requireRole } from '@/lib/session'
 import { itemSchema, fieldErrors } from '@/lib/validation'
 import { parseMinor } from '@/domain/money'
@@ -31,19 +30,22 @@ export async function createItem(_prev: FormState, formData: FormData): Promise<
   }
 
   try {
-    await db.transaction(async (tx) => {
-      const [created] = await tx
-        .insert(items)
-        .values({
-          entityId: session.entityId,
-          name: parsed.data.name,
-          description: parsed.data.description,
-          hsnSac: parsed.data.hsnSac,
-          unit: parsed.data.unit,
-          unitPriceMinor: parseMinor(parsed.data.unitPrice),
-          defaultTaxRatePercent: parsed.data.taxRatePercent,
-        })
-        .returning()
+    const store = await getDb()
+    await withTransaction(store, async (tx) => {
+      const created = {
+        _id: newId(),
+        entityId: session.entityId,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        hsnSac: parsed.data.hsnSac,
+        unit: parsed.data.unit,
+        unitPriceMinor: parseMinor(parsed.data.unitPrice),
+        defaultTaxRatePercent: parsed.data.taxRatePercent,
+        incomeAccountId: null,
+        isActive: true,
+        createdAt: new Date(),
+      }
+      await tx.items.insertOne(created, { session: tx.session })
 
       await recordAudit(tx, {
         entityId: session.entityId,
@@ -51,7 +53,7 @@ export async function createItem(_prev: FormState, formData: FormData): Promise<
         actorEmail: session.email,
         action: 'create',
         recordType: 'item',
-        recordId: created.id,
+        recordId: created._id,
         after: created,
       })
     })
@@ -76,27 +78,28 @@ export async function updateItem(
   }
 
   try {
-    await db.transaction(async (tx) => {
-      const [before] = await tx
-        .select()
-        .from(items)
-        .where(and(eq(items.entityId, session.entityId), eq(items.id, id)))
-        .limit(1)
-
+    const store = await getDb()
+    await withTransaction(store, async (tx) => {
+      const before = await tx.items.findOne(
+        { _id: id, entityId: session.entityId },
+        { session: tx.session },
+      )
       if (!before) throw new Error('That item no longer exists.')
 
-      const [after] = await tx
-        .update(items)
-        .set({
-          name: parsed.data.name,
-          description: parsed.data.description,
-          hsnSac: parsed.data.hsnSac,
-          unit: parsed.data.unit,
-          unitPriceMinor: parseMinor(parsed.data.unitPrice),
-          defaultTaxRatePercent: parsed.data.taxRatePercent,
-        })
-        .where(eq(items.id, id))
-        .returning()
+      const after = await tx.items.findOneAndUpdate(
+        { _id: id },
+        {
+          $set: {
+            name: parsed.data.name,
+            description: parsed.data.description,
+            hsnSac: parsed.data.hsnSac,
+            unit: parsed.data.unit,
+            unitPriceMinor: parseMinor(parsed.data.unitPrice),
+            defaultTaxRatePercent: parsed.data.taxRatePercent,
+          },
+        },
+        { session: tx.session, returnDocument: 'after' },
+      )
 
       await recordAudit(tx, {
         entityId: session.entityId,
@@ -121,11 +124,13 @@ export async function deleteItem(id: string): Promise<DeleteResult> {
   const session = await requireRole('admin')
 
   try {
-    await db.transaction(async (tx) => {
-      const [before] = await tx.select().from(items).where(eq(items.id, id)).limit(1)
-      // Safe to delete: document lines snapshot the item's details, and the
-      // line's item_id is ON DELETE SET NULL, so issued documents are untouched.
-      await tx.delete(items).where(eq(items.id, id))
+    const store = await getDb()
+    await withTransaction(store, async (tx) => {
+      const before = await tx.items.findOne({ _id: id }, { session: tx.session })
+      // Safe to delete: document lines snapshot the item's details, and a
+      // line's itemId simply stays pointing at nothing once it is gone -- an
+      // issued document is unaffected either way.
+      await tx.items.deleteOne({ _id: id }, { session: tx.session })
       await recordAudit(tx, {
         entityId: session.entityId,
         actorId: session.userId,
