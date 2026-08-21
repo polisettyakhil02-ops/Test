@@ -1,0 +1,81 @@
+# Publishes the browser app to GitHub Pages.
+#
+# Pages serves static files only, so this deploys the front end alone — the API
+# has to run somewhere that can hold a connection to MongoDB Atlas. Set the
+# repository variable API_URL to that API's public HTTPS origin
+# (Settings → Secrets and variables → Actions → Variables), and on the API set
+# COOKIE_CROSS_SITE=true and add this Pages origin to CORS_ORIGINS.
+#
+# Both sides must be HTTPS: a cross-site session cookie needs SameSite=None,
+# and browsers refuse SameSite=None over plain HTTP.
+name: Deploy front end to Pages
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a queued run supersedes a waiting one but never
+# cancels a deploy that is already applying.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/configure-pages@v5
+        id: pages
+
+      - run: npm ci
+        working-directory: frontend
+
+      # '/' for a user or organisation site, '/<repo>/' for a project site.
+      # configure-pages reports it without a trailing slash (and as an empty
+      # string for a user site); Vite wants one, so normalise here rather than
+      # in an expression that cannot handle both shapes.
+      - name: Work out the base path
+        id: base
+        run: |
+          raw='${{ steps.pages.outputs.base_path }}'
+          [ -z "$raw" ] && raw='/'
+          case "$raw" in */) ;; *) raw="$raw/" ;; esac
+          echo "value=$raw" >> "$GITHUB_OUTPUT"
+          echo "Building with base $raw"
+
+      - name: Build
+        working-directory: frontend
+        env:
+          # Inlined into the bundle at build time — a static site has no server
+          # to read configuration from.
+          VITE_API_URL: ${{ vars.API_URL }}
+          VITE_BASE: ${{ steps.base.outputs.value }}
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
