@@ -106,3 +106,52 @@ production deployment. Before pointing real traffic at it:
   stubs them (support tickets just log to console right now).
 - Review `docs/Ask_the_ERP_Developer_Spec.pdf` section 10 (Non-Functional
   Requirements) for the full checklist this was built against.
+
+---
+
+# Dominare Tech CRM
+
+A separate, second project in this repo: an internal CRM for Dominare Tech
+that combines a sales pipeline (companies, contacts, deals) with developer
+task tracking, loosely linked to deals. Built on MERN (MongoDB, Express,
+React, Node) for a small (2-10 person) team with three roles - **admin**,
+**sales**, **developer** - enforced by JWT auth and role-gated writes.
+
+```
+crm-backend/    Express + Mongoose API - auth, CRUD, pipeline stages, dashboard aggregation
+crm-frontend/   Vite + React app - pipeline board, task board, dashboards, role-aware nav
+```
+
+Each has its own README with full setup/run instructions:
+[`crm-backend/README.md`](crm-backend/README.md) ·
+[`crm-frontend/README.md`](crm-frontend/README.md)
+
+## CRM Quickstart
+
+Needs a reachable MongoDB (local `mongod` or a hosted connection string).
+Two terminals:
+
+```bash
+# Terminal 1
+cd crm-backend && npm install && cp .env.example .env
+npm run seed                                  # creates admin/sales/developer demo users + sample data
+npm start                                     # http://localhost:4000
+
+# Terminal 2
+cd crm-frontend && npm install && cp .env.example .env
+npm run dev                                   # http://localhost:5174
+```
+
+Log in with the seeded admin account (`crm-backend/README.md` lists all
+three demo logins) and walk the flow: create a company → contact → deal,
+move the deal through pipeline stages, create a task linked to the deal and
+assign it to the developer account, then log in as that developer to update
+the task's status. The dashboard reflects all of it.
+
+```bash
+cd crm-backend && npm test    # 12 tests: password hashing, JWT, role permissions
+cd crm-frontend && npm run build
+```
+
+This is a separate, independently runnable project from "Ask the ERP" above
+- unrelated data, unrelated ports, no shared code.

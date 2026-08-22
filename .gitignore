@@ -8,4 +8,9 @@ backend/data/audit.log
 .env
 backend/.env
 frontend/.env
+crm-backend/.env
+crm-frontend/.env
 .DS_Store
+
+# crm-frontend production build output
+crm-frontend/dist/

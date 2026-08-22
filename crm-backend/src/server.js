@@ -1,0 +1,41 @@
+const express = require('express');
+const cors = require('cors');
+
+const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
+const companyRoutes = require('./routes/companies');
+const contactRoutes = require('./routes/contacts');
+const dealRoutes = require('./routes/deals');
+const taskRoutes = require('./routes/tasks');
+const activityRoutes = require('./routes/activities');
+const dashboardRoutes = require('./routes/dashboard');
+const { errorHandler } = require('./middleware/errorHandler');
+
+function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
+  const app = express();
+
+  app.set('jwtSecret', jwtSecret);
+  app.set('jwtExpiresIn', jwtExpiresIn);
+
+  const origins = corsOrigin && corsOrigin !== '*' ? corsOrigin.split(',').map((o) => o.trim()) : '*';
+  app.use(cors({ origin: origins }));
+  app.use(express.json());
+
+  app.get('/health', (_req, res) => res.json({ ok: true }));
+
+  app.use('/api/auth', authRoutes);
+  app.use('/api/users', userRoutes);
+  app.use('/api/companies', companyRoutes);
+  app.use('/api/contacts', contactRoutes);
+  app.use('/api/deals', dealRoutes);
+  app.use('/api/tasks', taskRoutes);
+  app.use('/api/activities', activityRoutes);
+  app.use('/api/dashboard', dashboardRoutes);
+
+  app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+  app.use(errorHandler);
+
+  return app;
+}
+
+module.exports = { createApp };
