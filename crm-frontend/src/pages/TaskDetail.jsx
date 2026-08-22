@@ -437,8 +437,8 @@ export default function TaskDetail() {
                 <span className="stat-label">{s.label || 'Untitled'} · {s.language}</span>
                 {canEditWork && <button type="button" onClick={() => removeSnippet(s._id)}>Remove</button>}
               </div>
-              <pre style={{ background: 'var(--color-code-bg, #f4f4f5)', padding: '0.6rem', borderRadius: 6, overflowX: 'auto', margin: 0 }}>
-                <code>{s.code}</code>
+              <pre style={{ background: 'var(--color-surface-alt)', border: '1px solid var(--color-border)', padding: '0.6rem', borderRadius: 6, overflowX: 'auto', margin: 0 }}>
+                <code style={{ fontFamily: 'var(--font-mono)' }}>{s.code}</code>
               </pre>
             </div>
           ))

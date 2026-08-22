@@ -1,11 +1,14 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { SearchBar } from './SearchBar';
 import { NotificationBell } from './NotificationBell';
+import { getCurrentTheme, toggleTheme } from '../lib/theme';
 
 export function Layout() {
   const { user, logout } = useAuth();
   const canSeeClientData = user?.role === 'admin' || user?.role === 'sales';
+  const [theme, setTheme] = useState(getCurrentTheme);
 
   return (
     <div className="app-shell">
@@ -25,6 +28,9 @@ export function Layout() {
           {user?.role === 'admin' && <NavLink to="/users">Users</NavLink>}
         </nav>
         {canSeeClientData && <SearchBar />}
+        <button type="button" className="theme-toggle" onClick={() => setTheme(toggleTheme())}>
+          {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+        </button>
         <NotificationBell />
         <div className="app-user">
           <NavLink to="/profile">

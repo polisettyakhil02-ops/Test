@@ -5,7 +5,6 @@ import { useAuth } from '../auth/AuthContext';
 import { gitBranchName, parseStackTrace } from '../lib/textUtils';
 import './DeveloperDashboard.css';
 
-const THEME_KEY = 'dominare_dev_workstation_theme';
 const SCRATCHPAD_SAVE_DELAY_MS = 800;
 const STATUS_LABELS = { todo: 'To do', in_progress: 'In progress', in_review: 'In review', done: 'Done' };
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
@@ -36,11 +35,11 @@ function environmentVariant(envText) {
 }
 
 // This page defines its own theme-aware badge classes (dw-badge-*) instead
-// of reusing the app's global SeverityBadge/TaskStatusBadge components -
-// those are hardcoded to light-mode colors in base.css and would go
-// illegible on the workstation's dark surface. Everything in here reads its
-// color from the .dev-workstation CSS custom properties instead, so it
-// adapts when the theme toggle flips data-theme.
+// of reusing the app's global SeverityBadge/TaskStatusBadge components,
+// which are styled directly against the shared tokens rather than this
+// page's --dw-* aliases - keeping a local set here just means every badge
+// on this page can lean on the same --dw-mono/--dw-badge-* vocabulary as
+// the rest of the workstation.
 function StatusPill({ status }) {
   return <span className={`dw-badge dw-badge-status-${status}`}>{STATUS_LABELS[status] || status}</span>;
 }
@@ -64,22 +63,6 @@ export default function DeveloperDashboard({ data, onReload }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState(null);
-
-  const [theme, setTheme] = useState(() => {
-    try {
-      return localStorage.getItem(THEME_KEY) || 'dark';
-    } catch {
-      return 'dark';
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      // localStorage can throw in a locked-down/private context - the
-      // toggle still works for the session, it just won't persist.
-    }
-  }, [theme]);
 
   // ---------- Active Focus hero card ----------
   const [activeTask, setActiveTask] = useState(data.activeTask);
@@ -202,7 +185,7 @@ export default function DeveloperDashboard({ data, onReload }) {
   }
 
   return (
-    <div className="dev-workstation" data-theme={theme}>
+    <div className="dev-workstation">
       <div className="dw-topbar">
         <div>
           <span className="dw-eyebrow">Developer Workstation</span>
@@ -211,9 +194,6 @@ export default function DeveloperDashboard({ data, onReload }) {
         <div className="dw-topbar-actions">
           <button type="button" className="dw-kbd-hint" onClick={() => setPaletteOpen(true)}>
             <kbd>{IS_MAC ? '⌘' : 'Ctrl'}</kbd><kbd>K</kbd> Quick actions
-          </button>
-          <button type="button" className="dw-theme-toggle" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}>
-            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
         </div>
       </div>

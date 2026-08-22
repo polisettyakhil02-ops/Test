@@ -21,7 +21,7 @@ function DropField({ label, placeholder, value, onChange }) {
         border: `2px dashed ${dragOver ? 'var(--color-primary)' : 'var(--color-border)'}`,
         borderRadius: 8,
         padding: '0.6rem',
-        background: dragOver ? 'var(--color-primary-soft, #f0f4ff)' : 'transparent',
+        background: dragOver ? 'var(--color-info-bg)' : 'transparent',
       }}
       onDragOver={(e) => {
         e.preventDefault();

@@ -1,57 +1,41 @@
-/* Developer Workstation - a self-contained theme scoped to .dev-workstation.
-   Deliberately not touching the shared :root tokens in styles/base.css: the
-   rest of the app (nav, Companies, Deals, Chat, ...) stays on its existing
-   light palette, and this page's dark/light toggle only ever affects itself.
-   A full app-wide theme system would be a much larger, separate change. */
+/* Developer Workstation styling - reads its colors from the app-wide theme
+   tokens in styles/base.css (dominare_theme, toggled from Layout.jsx) rather
+   than keeping its own separate light/dark palette. The --dw-* names stay
+   (this file has its own vocabulary - accent-contrast, mono, shadow - that
+   base.css doesn't need), but their *values* now come from the same tokens
+   every other page uses, so the one global toggle covers this page too and
+   there's nothing here left to fall out of sync with it. */
 
 .dev-workstation {
-  --dw-bg: #f3f4f7;
-  --dw-surface: #ffffff;
-  --dw-surface-alt: #f4f5f8;
-  --dw-border: #e2e4ea;
-  --dw-text: #14161a;
-  --dw-text-muted: #676b76;
-  --dw-accent: #5b5bd6;
+  --dw-bg: var(--color-bg);
+  --dw-surface: var(--color-surface);
+  --dw-surface-alt: var(--color-surface-alt);
+  --dw-border: var(--color-border);
+  --dw-text: var(--color-text);
+  --dw-text-muted: var(--color-muted);
+  --dw-accent: var(--color-primary);
+  /* Both theme's --color-primary values are picked to give white text
+     enough contrast as a button fill (see base.css's token comment) - no
+     need for this to flip per theme like it used to. */
   --dw-accent-contrast: #ffffff;
-  --dw-shadow: 0 1px 2px rgba(15, 15, 20, 0.05), 0 8px 24px -14px rgba(15, 15, 20, 0.18);
+  --dw-shadow: var(--shadow);
 
-  --dw-danger: #b3261e;
-  --dw-danger-bg: #fbe9e7;
-  --dw-warning: #8a5a06;
-  --dw-warning-bg: #fdf0d8;
-  --dw-success: #1c7a3e;
-  --dw-success-bg: #e3f6e8;
-  --dw-info: #3452c4;
-  --dw-info-bg: #e8ebfb;
+  --dw-danger: var(--color-danger);
+  --dw-danger-bg: var(--color-danger-bg);
+  --dw-warning: var(--color-warning);
+  --dw-warning-bg: var(--color-warning-bg);
+  --dw-success: var(--color-success);
+  --dw-success-bg: var(--color-success-bg);
+  --dw-info: var(--color-info);
+  --dw-info-bg: var(--color-info-bg);
 
-  --dw-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --dw-mono: var(--font-mono);
 
   background: var(--dw-bg);
   color: var(--dw-text);
   border-radius: 14px;
   padding: 1.5rem;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-
-.dev-workstation[data-theme="dark"] {
-  --dw-bg: #0c0d10;
-  --dw-surface: #16171c;
-  --dw-surface-alt: #1c1e24;
-  --dw-border: #2b2d35;
-  --dw-text: #e9eaed;
-  --dw-text-muted: #93969f;
-  --dw-accent: #8f8ff5;
-  --dw-accent-contrast: #0c0d10;
-  --dw-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px -14px rgba(0, 0, 0, 0.7);
-
-  --dw-danger: #ec8579;
-  --dw-danger-bg: #351917;
-  --dw-warning: #e3ac52;
-  --dw-warning-bg: #362912;
-  --dw-success: #71cd93;
-  --dw-success-bg: #142819;
-  --dw-info: #93aaf2;
-  --dw-info-bg: #1a2140;
 }
 
 /* ---------- Layout ---------- */

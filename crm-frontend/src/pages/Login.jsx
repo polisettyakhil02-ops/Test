@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { getCurrentTheme, toggleTheme } from '../lib/theme';
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -9,6 +10,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [theme, setTheme] = useState(getCurrentTheme);
 
   if (user) return <Navigate to={location.state?.from || '/'} replace />;
 
@@ -44,6 +46,9 @@ export default function Login() {
           </button>
         </div>
       </form>
+      <button type="button" className="theme-toggle login-theme-toggle" onClick={() => setTheme(toggleTheme())}>
+        {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+      </button>
     </div>
   );
 }

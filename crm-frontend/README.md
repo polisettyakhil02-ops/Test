@@ -58,6 +58,36 @@ backend's `src/lib/permissions.js` - the backend is still the source of
 truth and re-checks every request, the frontend just avoids showing or
 routing to controls a given role can't use.
 
+## Theme
+
+The whole app - not just the Developer Workstation - runs on one dark/light
+theme system (`src/lib/theme.js`, tokens in `src/styles/base.css`). Dark is
+the default. A toggle sits in the header (`Layout.jsx`, next to the
+notification bell) and on the login screen; both call the same
+`toggleTheme()`, which flips `data-theme` on `<html>` and remembers the
+choice in `localStorage` (`dominare_theme`). `index.html` has a small
+blocking inline script that applies the stored (or default) theme before
+the stylesheet paints anything, so there's no flash of the wrong theme on
+load.
+
+Every color in `base.css` is a `var(--color-*)` against that token set, so
+re-theming the whole app was mostly just redefining the tokens under
+`:root[data-theme="dark"]` once - no per-page changes needed, apart from a
+few spots that had a hardcoded hex instead of a token (a couple of table/
+badge backgrounds, and every plain `input`/`select`/`textarea`, which had no
+explicit background/color at all and would otherwise have stayed a plain
+white browser-default box in dark mode). The **Developer Workstation**
+(`DeveloperDashboard.jsx`/`.css`) used to carry its own separate light/dark
+palette and toggle; it now just aliases its `--dw-*` names to the same
+`--color-*` tokens, so the one global toggle covers it too. The Smart
+Analysis dashboard's funnel chart is the one exception that needed actual
+per-theme values rather than a token: SVG fill through `recharts`' `Cell`
+prop doesn't reliably resolve a `var()`, and a light-mode "light→dark"
+ordinal ramp would have made the funnel's last couple of bars nearly
+invisible against a dark surface (its darkest steps measured 2-3:1 contrast
+there) - so `Dashboard.jsx` picks between two contrast-checked ramps based
+on the current theme instead.
+
 ## Auth
 
 JWT is stored in `localStorage` and attached as `Authorization: Bearer` on

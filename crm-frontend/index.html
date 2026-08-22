@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dominare CRM</title>
+    <!--
+      Sets data-theme before the stylesheet paints anything, so there's no
+      flash of the wrong theme on load. Kept as a tiny inline, non-module
+      script (blocking, synchronous) rather than something in main.jsx,
+      which only runs after the initial paint. Mirrors src/lib/theme.js's
+      key/default - not imported from it because this has to run standalone,
+      before any module graph resolves.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('dominare_theme');
+          document.documentElement.setAttribute('data-theme', stored || 'dark');
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

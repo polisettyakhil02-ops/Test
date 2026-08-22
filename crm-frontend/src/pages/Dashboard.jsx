@@ -2,18 +2,41 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, LabelList, ResponsiveContainer } from 'recharts';
 import { api } from '../api/client';
+import { getCurrentTheme } from '../lib/theme';
 import DeveloperDashboard from './DeveloperDashboard';
 
 const STAGE_LABELS = { new: 'New', contacted: 'Contacted', qualified: 'Qualified', proposal: 'Proposal', won: 'Won', lost: 'Lost' };
 const CATEGORY_LABELS = { rotting_deal: 'Rotting deal', deal_no_task: 'No next step', overdue_bug: 'Overdue bug' };
 
 // Ordinal ramp for the funnel bars: one hue (the app's own blue), monotone
-// light->dark steps - position in the funnel is encoded by lightness, not
-// by a different color per stage. Must stay in the same order as the
-// backend's FUNNEL_STAGES (src/lib/dashboardInsights.js) - 'lost' is
-// deliberately excluded from the funnel (see that file for why) and
-// reported separately as funnel.lostRate.
-const FUNNEL_RAMP = { new: '#86b6ef', contacted: '#5598e7', qualified: '#2a78d6', proposal: '#1c5cab', won: '#104281' };
+// steps - position in the funnel is encoded by lightness, not by a
+// different color per stage. Must stay in the same order as the backend's
+// FUNNEL_STAGES (src/lib/dashboardInsights.js) - 'lost' is deliberately
+// excluded from the funnel (see that file for why) and reported separately
+// as funnel.lostRate.
+//
+// Two ramps, not a CSS token: SVG fill can't cleanly consume a var()
+// through recharts' Cell prop in every browser, and light vs dark aren't
+// just inverted - a light surface wants light->dark (more emphasis reads as
+// darker/heavier), a dark surface wants dim->bright (more emphasis reads as
+// brighter, since darkening toward black would make the "most advanced"
+// stage's bar recede into the background instead of standing out).
+const FUNNEL_RAMP_LIGHT = { new: '#86b6ef', contacted: '#5598e7', qualified: '#2a78d6', proposal: '#1c5cab', won: '#104281' };
+const FUNNEL_RAMP_DARK = { new: '#3a5a9c', contacted: '#3d6fc4', qualified: '#4a86e0', proposal: '#6b9eec', won: '#9dc0f5' };
+
+// No React context for just this one chart - a MutationObserver on the
+// <html> element's data-theme is the whole surface area this needs, and it
+// picks up the Layout/Login toggle immediately without prop-drilling theme
+// state through pages that otherwise have no reason to know it exists.
+function useTheme() {
+  const [theme, setTheme] = useState(getCurrentTheme);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(getCurrentTheme()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return theme;
+}
 
 export default function Dashboard() {
   const [data, setData] = useState(null);
@@ -76,7 +99,9 @@ function ActionCenter({ items }) {
 }
 
 function FunnelSection({ funnel, stageVelocity }) {
-  const chartData = funnel.stages.map((s) => ({ ...s, fill: FUNNEL_RAMP[s.stage] }));
+  const theme = useTheme();
+  const ramp = theme === 'dark' ? FUNNEL_RAMP_DARK : FUNNEL_RAMP_LIGHT;
+  const chartData = funnel.stages.map((s) => ({ ...s, fill: ramp[s.stage] }));
 
   return (
     <div className="card" style={{ marginBottom: '1.5rem' }}>
@@ -100,7 +125,7 @@ function FunnelSection({ funnel, stageVelocity }) {
             tickLine={false}
             tick={{ fill: 'var(--color-muted)', fontSize: 12 }}
           />
-          <Tooltip content={<FunnelTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+          <Tooltip content={<FunnelTooltip />} cursor={{ fill: 'var(--color-surface-alt)' }} />
           <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={24} isAnimationActive={false}>
             {chartData.map((row) => (
               <Cell key={row.stage} fill={row.fill} />
