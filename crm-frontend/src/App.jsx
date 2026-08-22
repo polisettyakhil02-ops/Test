@@ -7,6 +7,8 @@ import Companies from './pages/Companies';
 import CompanyDetail from './pages/CompanyDetail';
 import Contacts from './pages/Contacts';
 import ContactDetail from './pages/ContactDetail';
+import Leads from './pages/Leads';
+import LeadDetail from './pages/LeadDetail';
 import Deals from './pages/Deals';
 import DealDetail from './pages/DealDetail';
 import RegisterDeal from './pages/RegisterDeal';
@@ -64,6 +66,22 @@ export default function App() {
           element={
             <ProtectedRoute roles={CLIENT_DATA_ROLES}>
               <ContactDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leads"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <Leads />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leads/:id"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <LeadDetail />
             </ProtectedRoute>
           }
         />

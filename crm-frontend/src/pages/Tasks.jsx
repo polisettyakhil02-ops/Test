@@ -61,6 +61,7 @@ export default function Tasks() {
   const assigneeName = (t) => developers.find((d) => d._id === t.assigneeId)?.name || (t.assigneeId ? t.assigneeId : 'Unassigned');
   const canEditStatus = (t) => user.role === 'admin' || user.role === 'sales' || String(t.assigneeId) === String(user.id || user._id);
   const dealLabel = (t) => {
+    if (t.leadId) return `Lead: ${t.leadId.name}`;
     if (!t.dealId) return 'Internal — no client';
     const company = t.dealId.companyId?.name;
     if (!company || t.dealId.title.toLowerCase().startsWith(company.toLowerCase())) return t.dealId.title;

@@ -13,6 +13,7 @@ export function Layout() {
         <div className="app-brand">Dominare CRM</div>
         <nav className="app-nav">
           <NavLink to="/" end>Dashboard</NavLink>
+          {canSeeClientData && <NavLink to="/leads">Leads</NavLink>}
           {canSeeClientData && <NavLink to="/deals">Pipeline</NavLink>}
           {canSeeClientData && <NavLink to="/companies">Companies</NavLink>}
           {canSeeClientData && <NavLink to="/contacts">Contacts</NavLink>}

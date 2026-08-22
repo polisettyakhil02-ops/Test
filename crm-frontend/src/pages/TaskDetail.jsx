@@ -59,6 +59,7 @@ export default function TaskDetail() {
   }, [id]);
 
   const dealLabel = () => {
+    if (task.leadId) return `Lead: ${task.leadId.name}`;
     if (!task.dealId) return 'Internal — no client';
     const company = task.dealId.companyId?.name;
     if (!company || task.dealId.title.toLowerCase().startsWith(company.toLowerCase())) return task.dealId.title;
@@ -92,6 +93,7 @@ export default function TaskDetail() {
         priority: detailsForm.priority,
         assigneeId: task.assigneeId,
         dealId: task.dealId?._id || task.dealId || null,
+        leadId: task.leadId?._id || task.leadId || null,
         dueDate: detailsForm.dueDate || null,
       });
       setEditingDetails(false);

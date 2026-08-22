@@ -14,6 +14,8 @@ const router = express.Router();
 // and company are populated inline here - enough context to know which
 // client a task is for, without exposing the wider pipeline.
 const DEAL_CONTEXT_POPULATE = { path: 'dealId', select: 'title companyId', populate: { path: 'companyId', select: 'name' } };
+// Same reasoning for leads (routes/leads.js is admin/sales only too).
+const LEAD_CONTEXT_POPULATE = { path: 'leadId', select: 'name companyName' };
 
 // Same rule as status updates: admin/sales always, or the assignee working
 // their own task.
@@ -32,9 +34,13 @@ router.get('/', async (req, res, next) => {
     const filter = {};
     if (req.query.assigneeId) filter.assigneeId = req.query.assigneeId;
     if (req.query.dealId) filter.dealId = req.query.dealId;
+    if (req.query.leadId) filter.leadId = req.query.leadId;
     if (req.query.status) filter.status = req.query.status;
     if (req.query.mine === 'true') filter.assigneeId = req.user.id;
-    const tasks = await Task.find(filter).sort({ createdAt: -1 }).populate(DEAL_CONTEXT_POPULATE);
+    const tasks = await Task.find(filter)
+      .sort({ createdAt: -1 })
+      .populate(DEAL_CONTEXT_POPULATE)
+      .populate(LEAD_CONTEXT_POPULATE);
     res.json({ tasks });
   } catch (err) {
     next(err);
@@ -43,7 +49,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const task = await Task.findById(req.params.id).populate(DEAL_CONTEXT_POPULATE);
+    const task = await Task.findById(req.params.id).populate(DEAL_CONTEXT_POPULATE).populate(LEAD_CONTEXT_POPULATE);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.json({ task });
   } catch (err) {
@@ -53,7 +59,7 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
-    const { title, description, priority, assigneeId, dealId, dueDate } = req.body || {};
+    const { title, description, priority, assigneeId, dealId, leadId, dueDate } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const task = await Task.create({
       title,
@@ -61,6 +67,7 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       priority,
       assigneeId: assigneeId || null,
       dealId: dealId || null,
+      leadId: leadId || null,
       dueDate,
       createdBy: req.user.id,
     });
@@ -80,13 +87,13 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
 
 router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
-    const { title, description, priority, assigneeId, dealId, dueDate } = req.body || {};
+    const { title, description, priority, assigneeId, dealId, leadId, dueDate } = req.body || {};
     const previous = await Task.findById(req.params.id);
     if (!previous) return res.status(404).json({ error: 'Task not found' });
 
     const task = await Task.findByIdAndUpdate(
       req.params.id,
-      { title, description, priority, assigneeId: assigneeId || null, dealId: dealId || null, dueDate },
+      { title, description, priority, assigneeId: assigneeId || null, dealId: dealId || null, leadId: leadId || null, dueDate },
       { new: true, runValidators: true }
     );
 

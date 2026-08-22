@@ -8,6 +8,7 @@ const activitySchema = new mongoose.Schema(
     body: { type: String, required: true, trim: true },
     dealId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deal', default: null },
     contactId: { type: mongoose.Schema.Types.ObjectId, ref: 'Contact', default: null },
+    leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
     // A task's comment thread - the one Activity target a developer can
     // read/write, since they have no read access to Deal/Contact directly
     // (see routes/tasks.js, routes/deals.js, routes/contacts.js).

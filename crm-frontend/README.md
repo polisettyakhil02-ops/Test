@@ -26,17 +26,18 @@ npm run preview  # serve the production build locally
 |---|---|---|
 | `/login` | Everyone | Email/password sign-in |
 | `/` | Any role | Dashboard, scoped by role: admin/sales see pipeline value, win rate, a **weighted forecast** (pipeline value discounted by stage-probability - a "proposal" deal counts for 75% of its value, not the full amount) with a per-stage breakdown, task/stage breakdowns, recent activity; developers see only their own tasks (open/overdue/completed, by status, task list) |
+| `/leads`, `/leads/:id` | Admin/sales only | Lead board grouped by lead-specific stages (new/contacted/qualified/nurturing/disqualified - separate from deal stages), lead detail with enrichment fields (LinkedIn, company website, phone), lead-specific tasks, notes, and a **Convert to deal** action that creates/reuses a company + contact and opens the resulting deal |
 | `/companies`, `/companies/:id` | Admin/sales only | Company directory + linked contacts/deals. Text filter, "show archived" toggle, archive/restore, CSV export |
 | `/contacts`, `/contacts/:id` | Admin/sales only | Contact directory + file attachments + activity timeline. Same filter/archive/CSV controls as companies; create rejects a duplicate email |
 | `/deals`, `/deals/:id` | Admin/sales only | Pipeline board grouped by stage, deal detail with linked tasks, file attachments, and activity. Owner filter, archive/restore, CSV export; moving a deal to "lost" prompts for a reason, logged to its activity timeline |
 | `/deals/new` | Admin/sales only | **Register a deal.** Pick a company, check for open deals already on that account, and either create straight away or show what's already active and require an explicit "register anyway" (logged to the new deal's activity). Pipeline's "Register deal" button leads here. |
-| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default, and see which client each task is for as a plain read-only label (no link into the pipeline). Admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification. Both this board and the Pipeline board support **drag-and-drop** (`src/components/DndBoard.jsx`) to move a card between columns, in addition to the status/stage dropdown each card still has |
+| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default, and see which client or lead each task is for as a plain read-only label (no link into the pipeline). Admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification. This board, the Pipeline board, and the Leads board all support **drag-and-drop** (`src/components/DndBoard.jsx`) to move a card between columns, in addition to the status/stage dropdown each card still has |
 | `/tasks/:id` | Any role | Task detail: status/assignee, an editable description/priority/due-date (admin/sales), a subtask checklist, file attachments, and a comment thread - the same write rule throughout as the board's status dropdown (admin/sales, or the assignee) |
 | `/users` | Admin only | Create team accounts, activate/deactivate |
 | `/rules` | Admin only | **Automation.** Create/edit/delete rules that fire on a CRM event (deal created/stage changed, task created/assigned/status changed) with an optional single field-match condition, and either send a notification or create a task - templated with `{{field}}` placeholders. Enable/disable any rule with a checkbox without deleting it |
 | `/profile` | Any role | Change your own password |
 
-A developer's nav doesn't show Pipeline, Companies, or Contacts at all - not
+A developer's nav doesn't show Leads, Pipeline, Companies, or Contacts at all - not
 just because there's nothing useful there, but because the backend rejects
 those requests outright (`403`). The routes are also role-gated in
 `App.jsx`, so a developer hitting one of those URLs directly gets redirected

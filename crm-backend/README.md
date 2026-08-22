@@ -57,6 +57,10 @@ All routes except `/health` and `POST /api/auth/login` require
 | `GET /api/auth/me` | Current user |
 | `PATCH /api/auth/me/password` | Self-service password change - `{ currentPassword, newPassword }` |
 | `GET/POST/PATCH /api/users` | Admin only (reads included) - manage team accounts |
+| `GET/POST/PUT/DELETE /api/leads` | Admin/sales only (reads included). Excludes archived unless `?archived=true`; filter by `?stage=`, `?ownerId=`. `DELETE` (permanent) is admin-only |
+| `PATCH /api/leads/:id/stage` | Admin/sales. Moves the lead's own stage pipeline (`new`→`contacted`→`qualified`→`nurturing`/`disqualified`) - distinct from `Deal.STAGES`. Rejected once the lead has been converted |
+| `PATCH /api/leads/:id/archive`, `/restore` | Same pattern as companies |
+| `POST /api/leads/:id/convert` | Admin/sales. Creates (or reuses, matched by name/email) a Company + Contact, creates a `Deal` (`stage:'new'`), stamps `convertedToDealId`/`convertedAt` on the lead and archives it. **Not transactional** - see **Leads & conversion** below |
 | `GET/POST/PUT/DELETE /api/companies` | Admin/sales only (reads included) - developers get `403`. Excludes archived unless `?archived=true`. `DELETE` (permanent) is admin-only |
 | `PATCH /api/companies/:id/archive`, `/restore` | Soft delete/undelete - admin/sales |
 | `GET/POST/PUT/DELETE /api/contacts` | Same access pattern as companies; filter by `?companyId=`; rejects a duplicate email with `409` |
@@ -64,11 +68,11 @@ All routes except `/health` and `POST /api/auth/login` require
 | `GET/POST/PUT/DELETE /api/deals` | Same access pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
 | `GET /api/deals/conflicts?companyId=` | Admin/sales only. Deal registration check: open (non-won/lost, non-archived) deals already on that company, with owner and last activity - the "is someone already working this account" check before registering a new deal |
 | `PATCH /api/deals/:id/archive`, `/restore` | Same pattern as companies |
-| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }` so they can see which client a task is for without needing direct access to `/api/deals` or `/api/companies`. Create/edit (including reassigning `assigneeId` on an existing task): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
+| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }` and `leadId` populated to `{ name, companyName }`, so they can see which client (or lead) a task is for without needing direct access to `/api/deals`, `/api/companies`, or `/api/leads`. Create/edit (including reassigning `assigneeId` on an existing task, and setting `dealId`/`leadId`): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?leadId=`, `?status=`, `?mine=true` |
 | `POST /api/tasks/:id/subtasks` | Add a checklist item - same permission as `PATCH /:id/status` (admin/sales, or the assignee) |
 | `PATCH /api/tasks/:id/subtasks/:subtaskId` | Toggle `done` and/or rename a subtask |
 | `DELETE /api/tasks/:id/subtasks/:subtaskId` | Remove a subtask |
-| `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes/comments, scoped to `?dealId=`, `?contactId=`, or `?taskId=`. `dealId`/`contactId` activities are admin/sales only (same restriction as the records themselves); `taskId` activities (a task's comment thread) are open to any role, same as the task |
+| `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes/comments, scoped to `?dealId=`, `?contactId=`, `?leadId=`, or `?taskId=`. `dealId`/`contactId`/`leadId` activities are admin/sales only (same restriction as the records themselves); `taskId` activities (a task's comment thread) are open to any role, same as the task |
 | `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
 | `GET /api/search?q=` | Admin/sales only - it only searches companies/contacts/deals, all of which are already admin/sales-only. Case-insensitive name/title match, up to 6 results each, archived records excluded |
 | `GET /api/notifications` | Current user's notifications (newest first) + unread count |
@@ -85,14 +89,15 @@ See `src/lib/permissions.js` (unit tested in `test/permissions.test.js`) for
 the source of truth. Summary:
 
 - **admin**: full access to everything, including user management.
-- **sales**: full CRUD on companies/contacts/deals/activities/tasks; no user management.
-- **developer**: no access to companies, contacts, the pipeline, or the user
-  directory (`GET` included - this is enforced on the backend, not just
-  hidden in the UI). Can only update the status of tasks assigned to them
-  (and subtasks/attachments on them), and comment on any task's thread.
-  Sees which client a task belongs to through the task itself (`dealId`
-  populated with the deal title and company name), not by browsing the
-  client database.
+- **sales**: full CRUD on leads/companies/contacts/deals/activities/tasks; no user management.
+- **developer**: no access to leads, companies, contacts, the pipeline, or
+  the user directory (`GET` included - this is enforced on the backend, not
+  just hidden in the UI). Can only update the status of tasks assigned to
+  them (and subtasks/attachments on them), and comment on any task's thread.
+  Sees which client or lead a task belongs to through the task itself
+  (`dealId` populated with the deal title and company name, or `leadId`
+  populated with the lead name and company), not by browsing the client
+  database.
 
 Companies/contacts/deals aren't visible to every role by default - only
 admin and sales have any reason to see client data or deal values. Task and
@@ -104,11 +109,20 @@ worth revisiting if the team grows.
 
 ## Data model
 
-- **Deal** unifies "lead" and "deal" into one pipeline object (`stage`
-  starts at `new` and moves through `contacted` -> `qualified` -> `proposal`
-  -> `won`/`lost`) rather than having separate Lead and Deal models.
-- **Task** has an *optional* `dealId` - this is the "loose link" to developer
-  work: a task can reference a client/deal, or stand alone as internal work.
+- **Lead** is a distinct pre-sales object with its own stage pipeline
+  (`new` -> `contacted` -> `qualified` -> `nurturing`/`disqualified`,
+  `Lead.STAGES` - separate from `Deal.STAGES`) and enrichment fields
+  (`companyName`/`companyWebsite`, `contactName`/`contactEmail`/`contactPhone`,
+  `linkedinUrl`, `source`). `POST /api/leads/:id/convert` graduates it into a
+  real `Company`/`Contact`/`Deal` - see **Leads & conversion** below.
+- **Deal** stays the unified pipeline object once a lead converts (or when
+  created directly, bypassing the lead stage entirely) - `stage` starts at
+  `new` and moves through `contacted` -> `qualified` -> `proposal` ->
+  `won`/`lost`.
+- **Task** has *optional* `dealId` and `leadId` fields - the "loose link" to
+  developer work: a task can reference a client/deal, a pre-sales lead, or
+  stand alone as internal work. Convention (not a schema constraint) is that
+  a task uses at most one of the two.
 - **Company/Contact/Deal** have an `archived` flag rather than being hard-deleted
   by default - list endpoints exclude archived records unless `?archived=true`.
   Permanent `DELETE` still exists but is admin-only.
@@ -119,17 +133,18 @@ worth revisiting if the team grows.
 - **Task.subtasks** is an embedded array (`{ title, done }`), not a separate
   collection - a checklist belongs to exactly one task and is never queried
   on its own.
-- **Activity** now also attaches to a `taskId`, not just `dealId`/`contactId`
-  - a task's comment thread reuses the same model, feed, and API shape as
-    deal/contact notes instead of being a separate system.
+- **Activity** attaches to a `taskId`, `dealId`, `contactId`, or `leadId` -
+  a task's comment thread reuses the same model, feed, and API shape as
+  deal/contact/lead notes instead of being a separate system.
+- **Contact** has a `linkedinUrl` field alongside the existing `phone`.
 - **Attachment** is generic (`entityType` + `entityId`) so the same model and
   routes serve tasks, deals, and contacts.
 - **AuditLog** is a flat, append-only record of who did what and when
   (`action` + a small `changes` diff, not a full before/after snapshot) -
   wired into create/update/archive/restore/delete on companies, contacts,
-  and deals, create/update/reassign/status-change/delete on tasks, and
-  create/update/enable/disable/delete on automation rules.
-  Viewable at `GET /api/audit-log` (admin only).
+  deals, and leads (plus `stage_changed`/`converted` on leads), create/update
+  /reassign/status-change/delete on tasks, and create/update/enable/disable
+  /delete on automation rules. Viewable at `GET /api/audit-log` (admin only).
 - **Rule** defines an automation: a `trigger` (an event name plus an
   optional list of `{ field, op, value }` conditions, all of which must
   match) and one or more `actions` (`notify` or `create_task`, each with a
@@ -139,8 +154,9 @@ worth revisiting if the team grows.
 
 Events that used to trigger hardcoded notification logic directly in the
 route handlers (`deal.created`, `deal.stage_changed`, `task.created`,
-`task.assigned`, `task.status_changed`) now go through a small event/rule
-engine instead, so an admin can add, disable, or retarget behavior from
+`task.assigned`, `task.status_changed`, plus `lead.created` and
+`lead.converted`) now go through a small event/rule engine instead, so an
+admin can add, disable, or retarget behavior from
 `GET/POST/PATCH/DELETE /api/rules` without a code change:
 
 - `src/lib/ruleEngine.js` is pure, DB-free logic - condition matching
@@ -169,6 +185,35 @@ engine instead, so an admin can add, disable, or retarget behavior from
   stage change) plus one new example (auto-create a delivery kickoff task
   when a deal reaches `won`) - seeding is idempotent, skipped if any rule
   already exists.
+
+## Leads & conversion
+
+Leads are deliberately a separate model from Deal, not another Deal stage -
+they carry pre-sales-only fields (LinkedIn, free-text company info before a
+real Company record exists) and their own stage pipeline (`Lead.STAGES`).
+`POST /api/leads/:id/convert`:
+
+1. Resolves a `Company` - reuses one matching `companyName` case-insensitively,
+   or creates one from `companyName`/`companyWebsite` if none matches.
+2. Resolves a `Contact` the same way, matched by `contactEmail`.
+3. Creates a `Deal` (`stage: 'new'`) linked to that company/contact.
+4. Stamps `convertedToDealId`/`convertedAt` on the Lead and archives it (a
+   converted lead never re-enters the stage pipeline).
+5. Logs an Activity on the new deal noting which lead it came from, and
+   audit-logs both the lead's `converted` action and the deal's `created`
+   action.
+6. Emits `lead.converted` (and `deal.created`) through the automation engine,
+   so a rule can, e.g., notify the deal owner when a lead they were nurturing
+   converts.
+
+This is **not wrapped in a MongoDB transaction** - transactions need a
+replica set, and requiring one just for this endpoint would complicate local
+dev setup (the documented `MONGODB_URI` is a standalone `mongod`). If a step
+fails partway through, earlier-created records are not rolled back; the
+error is returned to the caller, and re-running the conversion is safe
+(the company/contact lookups are idempotent `findOne`-before-`create`
+checks, and the endpoint itself refuses to run twice on an already-converted
+lead).
 
 ## Forecasting
 

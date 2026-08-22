@@ -411,6 +411,10 @@ tbody tr:hover {
 .badge-task-in_review { background: #fff4e0; color: #a8630c; }
 .badge-task-in_progress { background: #e6ecff; color: var(--color-primary-dark); }
 
+.badge-lead-stage-qualified { background: #e3f6e5; color: #1e7a34; }
+.badge-lead-stage-nurturing { background: #e6ecff; color: var(--color-primary-dark); }
+.badge-lead-stage-disqualified { background: #fdecea; color: var(--color-danger); }
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

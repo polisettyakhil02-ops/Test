@@ -85,6 +85,21 @@ export const api = {
     remove: (id) => request(`/api/deals/${id}`, { method: 'DELETE' }),
   },
 
+  leads: {
+    list: (params = {}) => {
+      const qs = new URLSearchParams(params).toString();
+      return request(`/api/leads${qs ? `?${qs}` : ''}`);
+    },
+    get: (id) => request(`/api/leads/${id}`),
+    create: (body) => request('/api/leads', { method: 'POST', body }),
+    update: (id, body) => request(`/api/leads/${id}`, { method: 'PUT', body }),
+    setStage: (id, stage) => request(`/api/leads/${id}/stage`, { method: 'PATCH', body: { stage } }),
+    archive: (id) => request(`/api/leads/${id}/archive`, { method: 'PATCH' }),
+    restore: (id) => request(`/api/leads/${id}/restore`, { method: 'PATCH' }),
+    remove: (id) => request(`/api/leads/${id}`, { method: 'DELETE' }),
+    convert: (id, body = {}) => request(`/api/leads/${id}/convert`, { method: 'POST', body }),
+  },
+
   tasks: {
     list: (params = {}) => {
       const qs = new URLSearchParams(params).toString();

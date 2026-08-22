@@ -3,7 +3,15 @@ const mongoose = require('mongoose');
 // The fixed set of domain events the automation engine can react to. Kept
 // small and explicit rather than a free-text event name - every event here
 // has a real emitter (see routes/deals.js, routes/tasks.js via lib/events.js).
-const EVENT_TYPES = ['deal.created', 'deal.stage_changed', 'task.created', 'task.assigned', 'task.status_changed'];
+const EVENT_TYPES = [
+  'deal.created',
+  'deal.stage_changed',
+  'task.created',
+  'task.assigned',
+  'task.status_changed',
+  'lead.created',
+  'lead.converted',
+];
 const ACTION_TYPES = ['notify', 'create_task'];
 const CONDITION_OPS = ['equals', 'not_equals'];
 

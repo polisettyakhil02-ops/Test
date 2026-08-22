@@ -10,6 +10,7 @@ const Contact = require('../models/Contact');
 const Deal = require('../models/Deal');
 const Task = require('../models/Task');
 const Rule = require('../models/Rule');
+const Lead = require('../models/Lead');
 const { hashPassword } = require('../lib/password');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dominare_crm';
@@ -73,6 +74,26 @@ async function main() {
     console.log('Created sample company, contact, deal and task.');
   } else {
     console.log('Sample data already present, skipping.');
+  }
+
+  const existingLead = await Lead.findOne();
+  if (!existingLead) {
+    await Lead.create({
+      name: 'Northwind Traders - inbound demo request',
+      companyName: 'Northwind Traders',
+      companyWebsite: 'https://northwind.example.com',
+      contactName: 'Casey Rivera',
+      contactEmail: 'casey@northwind.example.com',
+      contactPhone: '555-0140',
+      linkedinUrl: 'https://linkedin.com/in/caseyrivera',
+      stage: 'contacted',
+      source: 'website form',
+      ownerId: sales._id,
+      createdBy: sales._id,
+    });
+    console.log('Created sample lead.');
+  } else {
+    console.log('Sample lead already present, skipping.');
   }
 
   const existingRule = await Rule.findOne();

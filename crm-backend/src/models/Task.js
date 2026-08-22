@@ -22,6 +22,10 @@ const taskSchema = new mongoose.Schema(
     // internal work. This is the "loose link" between dev work and the
     // sales pipeline.
     dealId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deal', default: null },
+    // Same loose-link idea for pre-sales work (e.g. "research this lead's
+    // stack before the first call") - a task references at most one of
+    // dealId/leadId, never both, but that's convention, not a schema constraint.
+    leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
     dueDate: { type: Date },
     subtasks: { type: [subtaskSchema], default: [] },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
