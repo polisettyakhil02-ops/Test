@@ -93,7 +93,7 @@ export default function DealDetail() {
             <tbody>
               {tasks.map((t) => (
                 <tr key={t._id}>
-                  <td>{t.title}</td>
+                  <td><Link to={`/tasks/${t._id}`}>{t.title}</Link></td>
                   <td><TaskStatusBadge status={t.status} /></td>
                 </tr>
               ))}

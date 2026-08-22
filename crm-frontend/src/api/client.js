@@ -90,10 +90,14 @@ export const api = {
       const qs = new URLSearchParams(params).toString();
       return request(`/api/tasks${qs ? `?${qs}` : ''}`);
     },
+    get: (id) => request(`/api/tasks/${id}`),
     create: (body) => request('/api/tasks', { method: 'POST', body }),
     update: (id, body) => request(`/api/tasks/${id}`, { method: 'PUT', body }),
     setStatus: (id, status) => request(`/api/tasks/${id}/status`, { method: 'PATCH', body: { status } }),
     remove: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
+    addSubtask: (id, title) => request(`/api/tasks/${id}/subtasks`, { method: 'POST', body: { title } }),
+    updateSubtask: (id, subtaskId, body) => request(`/api/tasks/${id}/subtasks/${subtaskId}`, { method: 'PATCH', body }),
+    removeSubtask: (id, subtaskId) => request(`/api/tasks/${id}/subtasks/${subtaskId}`, { method: 'DELETE' }),
   },
 
   activities: {
@@ -102,6 +106,40 @@ export const api = {
       return request(`/api/activities?${qs}`);
     },
     create: (body) => request('/api/activities', { method: 'POST', body }),
+  },
+
+  attachments: {
+    list: (entityType, entityId) => request(`/api/attachments?entityType=${entityType}&entityId=${entityId}`),
+    upload: async (entityType, entityId, file) => {
+      const formData = new FormData();
+      formData.append('entityType', entityType);
+      formData.append('entityId', entityId);
+      formData.append('file', file);
+      const headers = {};
+      const token = getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/api/attachments`, { method: 'POST', headers, body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Request failed with status ${res.status}`);
+      return data;
+    },
+    download: async (id, filename) => {
+      const headers = {};
+      const token = getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/api/attachments/${id}/download`, { headers });
+      if (!res.ok) throw new Error(`Download failed with status ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    },
+    remove: (id) => request(`/api/attachments/${id}`, { method: 'DELETE' }),
   },
 
   dashboard: () => request('/api/dashboard'),

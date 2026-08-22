@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { TASK_STATUSES, TaskStatusBadge } from '../components/TaskStatusBadge';
@@ -114,7 +115,9 @@ export default function Tasks() {
         renderColumnHeader={(col, items) => <h3>{col.key} ({items.length})</h3>}
         renderCard={(t) => (
           <div className="board-card">
-            <div className="board-card-title">{t.title}</div>
+            <div className="board-card-title" onPointerDown={(e) => e.stopPropagation()}>
+              <Link to={`/tasks/${t._id}`}>{t.title}</Link>
+            </div>
             <div className="stat-label" style={{ marginBottom: '0.35rem' }}>{dealLabel(t)}</div>
             {canAssign ? (
               <select

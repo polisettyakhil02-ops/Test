@@ -11,6 +11,7 @@ import Deals from './pages/Deals';
 import DealDetail from './pages/DealDetail';
 import RegisterDeal from './pages/RegisterDeal';
 import Tasks from './pages/Tasks';
+import TaskDetail from './pages/TaskDetail';
 import Users from './pages/Users';
 import Profile from './pages/Profile';
 
@@ -90,6 +91,7 @@ export default function App() {
           }
         />
         <Route path="/tasks" element={<Tasks />} />
+        <Route path="/tasks/:id" element={<TaskDetail />} />
         <Route path="/profile" element={<Profile />} />
         <Route
           path="/users"
