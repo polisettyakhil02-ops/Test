@@ -25,7 +25,7 @@ npm run preview  # serve the production build locally
 | Route | Who sees it | What it does |
 |---|---|---|
 | `/login` | Everyone | Email/password sign-in |
-| `/` | Any role | Dashboard: pipeline value, win rate, overdue tasks, task/stage breakdowns, recent activity |
+| `/` | Any role | Dashboard, scoped by role: admin/sales see pipeline value, win rate, task/stage breakdowns, recent activity; developers see only their own tasks (open/overdue/completed, by status, task list) |
 | `/companies`, `/companies/:id` | Any role (write: admin/sales) | Company directory + linked contacts/deals |
 | `/contacts`, `/contacts/:id` | Any role (write: admin/sales) | Contact directory + activity timeline |
 | `/deals`, `/deals/:id` | Any role (write: admin/sales) | Pipeline board grouped by stage, deal detail with linked tasks + activity |

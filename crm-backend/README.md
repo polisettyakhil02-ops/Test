@@ -53,7 +53,7 @@ All routes except `/health` and `POST /api/auth/login` require
 | `GET/POST/PUT/DELETE /api/deals` | Reads: any role. Writes: admin/sales. `PATCH /:id/stage` moves the pipeline stage and logs an activity |
 | `GET/POST/PUT/DELETE /api/tasks` | Reads: any role. Create/edit: admin/sales. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes, scoped to `?dealId=` or `?contactId=` |
-| `GET /api/dashboard` | Aggregate stats: deals by stage + total value, win rate, tasks by status/assignee, overdue task count, recent activity feed |
+| `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total value, win rate, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
 
 ## Roles & permissions
 
