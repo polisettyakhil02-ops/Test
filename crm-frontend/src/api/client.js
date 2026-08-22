@@ -167,6 +167,17 @@ export const api = {
     remove: (id) => request(`/api/rules/${id}`, { method: 'DELETE' }),
   },
 
+  chat: {
+    directory: () => request('/api/chat/directory'),
+    channels: () => request('/api/chat/channels'),
+    createChannel: (body) => request('/api/chat/channels', { method: 'POST', body }),
+    openDirect: (memberIds) => request('/api/chat/channels/direct', { method: 'POST', body: { memberIds } }),
+    messages: (channelId, params = {}) => {
+      const qs = new URLSearchParams(params).toString();
+      return request(`/api/chat/channels/${channelId}/messages${qs ? `?${qs}` : ''}`);
+    },
+  },
+
   dashboard: () => request('/api/dashboard'),
 
   search: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),

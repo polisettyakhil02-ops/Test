@@ -35,6 +35,7 @@ npm run preview  # serve the production build locally
 | `/tasks/:id` | Any role | Task detail: status/assignee, an editable description/priority/due-date (admin/sales), a subtask checklist, **code snippets** (label + language + a pasted fragment or stack trace, rendered in a `<pre><code>` block), file attachments, and a comment thread - the same write rule throughout as the board's status dropdown (admin/sales, or the assignee). Bugs (`type: 'bug'`) get an extra **Bug details** card: severity, environment, steps to reproduce, expected vs. actual behavior, editable alongside the description |
 | `/users` | Admin only | Create team accounts, activate/deactivate |
 | `/rules` | Admin only | **Automation.** Create/edit/delete rules that fire on a CRM event (deal created/stage changed, task created/assigned/status changed) with an optional single field-match condition, and either send a notification or create a task - templated with `{{field}}` placeholders. Enable/disable any rule with a checkbox without deleting it |
+| `/chat` | Any role | **Real-time chat.** A channel list (the shared #General team channel plus any DMs/groups you're in) and a live thread. Messages send/receive over a Socket.IO connection (`src/lib/socket.js`), not a page reload or polling - a message sent by anyone in the channel appears instantly for everyone else in it. "New DM" picks a teammate from a minimal name-only directory (`GET /api/chat/directory` - `/api/users` is admin-only) and finds-or-creates the DM channel |
 | `/profile` | Any role | Change your own password |
 
 A developer's nav doesn't show Leads, Pipeline, Companies, or Contacts at all - not
@@ -60,3 +61,10 @@ JWT is stored in `localStorage` and attached as `Authorization: Bearer` on
 every API call (`src/api/client.js`). There's no token refresh - sessions
 last as long as the backend's `JWT_EXPIRES_IN`, after which the user is
 redirected to `/login` on the next failed request.
+
+The chat Socket.IO connection (`src/lib/socket.js`) reuses the same stored
+token, passed in the connection handshake rather than a header (`auth:
+{token}`) - Socket.IO's client/server handshake doesn't carry arbitrary
+HTTP headers the way `fetch` does. One shared connection per tab, created
+lazily on first use; `AuthContext`'s `logout()` disconnects it so a stale
+authenticated socket doesn't linger past logout.

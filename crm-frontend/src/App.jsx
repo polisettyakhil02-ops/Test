@@ -14,6 +14,7 @@ import DealDetail from './pages/DealDetail';
 import RegisterDeal from './pages/RegisterDeal';
 import Tasks from './pages/Tasks';
 import TaskDetail from './pages/TaskDetail';
+import Chat from './pages/Chat';
 import Users from './pages/Users';
 import Rules from './pages/Rules';
 import Profile from './pages/Profile';
@@ -111,6 +112,7 @@ export default function App() {
         />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
+        <Route path="/chat" element={<Chat />} />
         <Route path="/profile" element={<Profile />} />
         <Route
           path="/users"

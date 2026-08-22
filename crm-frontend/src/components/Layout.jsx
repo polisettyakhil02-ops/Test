@@ -18,6 +18,7 @@ export function Layout() {
           {canSeeClientData && <NavLink to="/companies">Companies</NavLink>}
           {canSeeClientData && <NavLink to="/contacts">Contacts</NavLink>}
           <NavLink to="/tasks">Tasks</NavLink>
+          <NavLink to="/chat">Chat</NavLink>
           {user?.role === 'admin' && <NavLink to="/rules">Automation</NavLink>}
           {user?.role === 'admin' && <NavLink to="/users">Users</NavLink>}
         </nav>

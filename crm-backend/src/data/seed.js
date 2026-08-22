@@ -11,6 +11,7 @@ const Deal = require('../models/Deal');
 const Task = require('../models/Task');
 const Rule = require('../models/Rule');
 const Lead = require('../models/Lead');
+const ChatChannel = require('../models/ChatChannel');
 const { hashPassword } = require('../lib/password');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dominare_crm';
@@ -147,6 +148,19 @@ async function main() {
     console.log('Created 3 default automation rules.');
   } else {
     console.log('Automation rules already present, skipping.');
+  }
+
+  const existingTeamChannel = await ChatChannel.findOne({ type: 'team' });
+  if (!existingTeamChannel) {
+    await ChatChannel.create({
+      type: 'team',
+      name: 'General',
+      memberIds: [admin._id, sales._id, developer._id],
+      createdBy: admin._id,
+    });
+    console.log('Created default #General team chat channel.');
+  } else {
+    console.log('Team chat channel already present, skipping.');
   }
 
   console.log('Seed complete.');

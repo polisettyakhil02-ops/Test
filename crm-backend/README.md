@@ -49,7 +49,9 @@ filesystem - a local disk won't survive a redeploy on most hosting platforms.
 
 All routes except `/health` and `POST /api/auth/login` require
 `Authorization: Bearer <token>` (obtained from `/api/auth/login`).
-`POST /api/auth/login` is rate-limited to 20 attempts/minute/IP.
+`POST /api/auth/login` is rate-limited to 20 attempts/minute/IP. Live chat
+message send/receive goes over a Socket.IO connection, not REST - see
+**Real-time chat** below.
 
 | Endpoint | Notes |
 |---|---|
@@ -85,6 +87,10 @@ All routes except `/health` and `POST /api/auth/login` require
 | `DELETE /api/attachments/:id` | The uploader, or admin/sales |
 | `GET /api/audit-log?entityType=&entityId=&limit=` | Admin only. Who did what, when - created/updated/archived/restored/deleted/stage_changed/status_changed/reassigned - across companies, contacts, deals, and tasks |
 | `GET/POST/PATCH/DELETE /api/rules` | Admin only. Manage automation rules - see **Automation** below. `GET` also returns `eventTypes`/`actionTypes`/`conditionOps` so the frontend form doesn't hardcode them |
+| `GET /api/chat/directory` | Any role. Minimal `{name, role}`-only user list for starting a DM - `/api/users` is admin-only, this exists so a non-admin can still see who's on the team |
+| `GET/POST /api/chat/channels` | Any role. List channels you belong to (`team` channels are implicitly everyone's); create a named `group` channel |
+| `POST /api/chat/channels/direct` | Any role. Find-or-create a DM (2 members) or group-DM (3+), keyed by the exact member set so re-requesting the same pair returns the same channel |
+| `GET /api/chat/channels/:id/messages` | Any role, membership required. Paginated history, newest-first internally but returned oldest-first; `?before=<messageId>&limit=` |
 
 ## Roles & permissions
 
@@ -148,6 +154,9 @@ worth revisiting if the team grows.
   a task's comment thread reuses the same model, feed, and API shape as
   deal/contact/lead notes instead of being a separate system.
 - **Contact** has a `linkedinUrl` field alongside the existing `phone`.
+- **ChatChannel** (`type`: `team`/`group`/`dm`) and **ChatMessage** back
+  real-time chat - see **Real-time chat** below. `team` channels don't need
+  every user backfilled into `memberIds`; `group`/`dm` channels do.
 - **Attachment** is generic (`entityType` + `entityId`) so the same model and
   routes serve tasks, deals, and contacts.
 - **AuditLog** is a flat, append-only record of who did what and when
@@ -248,6 +257,40 @@ values for the frontend's New Lead form to prefill, and the rep can edit
 everything before the real `POST /api/leads` (which now also accepts
 `enrichment`/`battleCard` in its body) actually creates anything. Re-running
 a parse costs nothing and leaves no partial records behind.
+
+## Real-time chat
+
+`src/realtime/index.js` attaches Socket.IO to the **same HTTP server**
+Express listens on (`src/index.js`) - no second port or process to deploy.
+The bottleneck risk with adding realtime to an existing API isn't "two
+servers competing," it's a socket handler doing synchronous CPU work on the
+single event loop and stalling every other request, REST or WebSocket,
+until it finishes. The mitigation here is entirely about what's *inside*
+each handler: every one does only awaited async I/O (a Mongo call), never a
+synchronous loop over a large payload.
+
+- **Auth**: the `/chat` namespace's connection middleware verifies the JWT
+  passed in the Socket.IO handshake (`socket.handshake.auth.token`) using
+  the exact same `verifyToken`/`sub` mapping `middleware/auth.js` uses for
+  REST - a bad or missing token gets `connect_error`, never a connection.
+- **Rooms**: one room per channel (`chat:<channelId>`); `channel:join`
+  checks membership (`team` channels are open to everyone; `group`/`dm`
+  channels check `memberIds`) before joining.
+- **`message:send`**: persists the `ChatMessage` first, *then* broadcasts
+  `message:new` to the room - write-through, so a message is never visible
+  to a peer and then lost if something crashes right after. The author is
+  populated (`name` only) before broadcasting so the frontend doesn't need
+  a second round-trip to resolve who sent it.
+- **`typing`**: relayed to the room only, never persisted - ephemeral by
+  design.
+- Every ack/emit acknowledges success/failure back to the sender
+  (`{ok: true}` / `{ok: false, error}`), so the frontend can surface a
+  failed send instead of it silently vanishing.
+
+No new datastore was added for this - MongoDB handles chat history fine at
+this team's scale. If this ever needs more than one server instance,
+Socket.IO's rooms need a shared adapter (e.g. Redis) to broadcast across
+processes - not needed now, worth remembering if that changes.
 
 ## Leads & conversion
 

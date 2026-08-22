@@ -1,6 +1,9 @@
 require('dotenv').config();
+const http = require('http');
+const { Server } = require('socket.io');
 const { connectDB } = require('./config/db');
 const { createApp } = require('./server');
+const { attachRealtime } = require('./realtime');
 
 const PORT = process.env.PORT || 4000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dominare_crm';
@@ -13,7 +16,15 @@ async function main() {
   console.log('Connected to MongoDB');
 
   const app = createApp({ jwtSecret: JWT_SECRET, jwtExpiresIn: JWT_EXPIRES_IN, corsOrigin: CORS_ORIGIN });
-  app.listen(PORT, () => console.log(`Dominare CRM API listening on port ${PORT}`));
+
+  // Socket.IO attaches to the same HTTP server Express listens on - no
+  // second port/process to run or deploy. See src/realtime/index.js for
+  // why this doesn't bottleneck the REST API.
+  const httpServer = http.createServer(app);
+  const io = new Server(httpServer, { cors: { origin: CORS_ORIGIN } });
+  attachRealtime(io, { jwtSecret: JWT_SECRET });
+
+  httpServer.listen(PORT, () => console.log(`Dominare CRM API (+ realtime) listening on port ${PORT}`));
 }
 
 main().catch((err) => {
