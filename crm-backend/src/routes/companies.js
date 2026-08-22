@@ -5,7 +5,11 @@ const { requireRole } = require('../middleware/requireRole');
 
 const router = express.Router();
 
-router.use(requireAuth);
+// Companies are client/account data - not something a developer needs to
+// browse. Every route here (reads included) is admin/sales; a developer
+// still sees the client a task belongs to via the task itself (see
+// routes/tasks.js populating dealId), just not the wider database.
+router.use(requireAuth, requireRole('admin', 'sales'));
 
 router.get('/', async (req, res, next) => {
   try {
@@ -27,7 +31,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
+router.post('/', async (req, res, next) => {
   try {
     const { name, industry, website, notes } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
@@ -38,7 +42,7 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
+router.put('/:id', async (req, res, next) => {
   try {
     const { name, industry, website, notes } = req.body || {};
     const company = await Company.findByIdAndUpdate(
@@ -53,7 +57,7 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
-router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/archive', async (req, res, next) => {
   try {
     const company = await Company.findByIdAndUpdate(req.params.id, { archived: true }, { new: true });
     if (!company) return res.status(404).json({ error: 'Company not found' });
@@ -63,7 +67,7 @@ router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, nex
   }
 });
 
-router.patch('/:id/restore', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/restore', async (req, res, next) => {
   try {
     const company = await Company.findByIdAndUpdate(req.params.id, { archived: false }, { new: true });
     if (!company) return res.status(404).json({ error: 'Company not found' });

@@ -8,7 +8,11 @@ const { requireRole } = require('../middleware/requireRole');
 
 const router = express.Router();
 
-router.use(requireAuth);
+// Same reasoning as routes/companies.js - the pipeline (deal values, stages,
+// which accounts are active) is admin/sales only. A developer sees the deal
+// their own task is linked to via the task itself (routes/tasks.js), not by
+// browsing this endpoint.
+router.use(requireAuth, requireRole('admin', 'sales'));
 
 router.get('/', async (req, res, next) => {
   try {
@@ -67,7 +71,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
+router.post('/', async (req, res, next) => {
   try {
     const { title, companyId, contactId, value, source, expectedCloseDate, ownerId, registeredDespiteConflict } =
       req.body || {};
@@ -99,7 +103,7 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
+router.put('/:id', async (req, res, next) => {
   try {
     const { title, companyId, contactId, value, source, expectedCloseDate, ownerId } = req.body || {};
     const deal = await Deal.findByIdAndUpdate(
@@ -114,7 +118,7 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
-router.patch('/:id/stage', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/stage', async (req, res, next) => {
   try {
     const { stage, reason } = req.body || {};
     if (!STAGES.includes(stage)) {
@@ -146,7 +150,7 @@ router.patch('/:id/stage', requireRole('admin', 'sales'), async (req, res, next)
   }
 });
 
-router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/archive', async (req, res, next) => {
   try {
     const deal = await Deal.findByIdAndUpdate(req.params.id, { archived: true }, { new: true });
     if (!deal) return res.status(404).json({ error: 'Deal not found' });
@@ -156,7 +160,7 @@ router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, nex
   }
 });
 
-router.patch('/:id/restore', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/restore', async (req, res, next) => {
   try {
     const deal = await Deal.findByIdAndUpdate(req.params.id, { archived: false }, { new: true });
     if (!deal) return res.status(404).json({ error: 'Deal not found' });

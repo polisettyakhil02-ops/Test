@@ -2,11 +2,24 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { canRead, canWrite, isValidRole } = require('../src/lib/permissions');
 
-test('canRead allows every role to read every resource', () => {
+test('admin and sales can read companies, contacts, and deals; developer cannot', () => {
+  for (const resource of ['company', 'contact', 'deal']) {
+    assert.equal(canRead('admin', resource), true);
+    assert.equal(canRead('sales', resource), true);
+    assert.equal(canRead('developer', resource), false);
+  }
+});
+
+test('only admin can read the user directory', () => {
+  assert.equal(canRead('admin', 'user'), true);
+  assert.equal(canRead('sales', 'user'), false);
+  assert.equal(canRead('developer', 'user'), false);
+});
+
+test('any role can read tasks and activities', () => {
   for (const role of ['admin', 'sales', 'developer']) {
-    for (const resource of ['company', 'contact', 'deal', 'task', 'activity', 'user']) {
-      assert.equal(canRead(role, resource), true);
-    }
+    assert.equal(canRead(role, 'task'), true);
+    assert.equal(canRead(role, 'activity'), true);
   }
 });
 

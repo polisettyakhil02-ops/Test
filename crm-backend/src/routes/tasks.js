@@ -8,6 +8,12 @@ const { canWrite } = require('../lib/permissions');
 
 const router = express.Router();
 
+// A developer can't read /api/companies or /api/deals directly (see
+// routes/companies.js and routes/deals.js), so their task's linked deal
+// and company are populated inline here - enough context to know which
+// client a task is for, without exposing the wider pipeline.
+const DEAL_CONTEXT_POPULATE = { path: 'dealId', select: 'title companyId', populate: { path: 'companyId', select: 'name' } };
+
 router.use(requireAuth);
 
 router.get('/', async (req, res, next) => {
@@ -17,7 +23,7 @@ router.get('/', async (req, res, next) => {
     if (req.query.dealId) filter.dealId = req.query.dealId;
     if (req.query.status) filter.status = req.query.status;
     if (req.query.mine === 'true') filter.assigneeId = req.user.id;
-    const tasks = await Task.find(filter).sort({ createdAt: -1 });
+    const tasks = await Task.find(filter).sort({ createdAt: -1 }).populate(DEAL_CONTEXT_POPULATE);
     res.json({ tasks });
   } catch (err) {
     next(err);
@@ -26,7 +32,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const task = await Task.findById(req.params.id);
+    const task = await Task.findById(req.params.id).populate(DEAL_CONTEXT_POPULATE);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.json({ task });
   } catch (err) {

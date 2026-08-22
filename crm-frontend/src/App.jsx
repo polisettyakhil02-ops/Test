@@ -14,6 +14,13 @@ import Tasks from './pages/Tasks';
 import Users from './pages/Users';
 import Profile from './pages/Profile';
 
+// Companies, contacts, and the pipeline are client/deal data - admin/sales
+// only, matching the backend (routes/companies.js, routes/contacts.js,
+// routes/deals.js all reject a developer with 403). Gating the routes here
+// too means a developer hitting one of these URLs directly gets redirected
+// instead of landing on a raw "Forbidden" error banner.
+const CLIENT_DATA_ROLES = ['admin', 'sales'];
+
 export default function App() {
   return (
     <Routes>
@@ -26,20 +33,62 @@ export default function App() {
         }
       >
         <Route path="/" element={<Dashboard />} />
-        <Route path="/companies" element={<Companies />} />
-        <Route path="/companies/:id" element={<CompanyDetail />} />
-        <Route path="/contacts" element={<Contacts />} />
-        <Route path="/contacts/:id" element={<ContactDetail />} />
-        <Route path="/deals" element={<Deals />} />
+        <Route
+          path="/companies"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <Companies />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/companies/:id"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <CompanyDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/contacts"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <Contacts />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/contacts/:id"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <ContactDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/deals"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <Deals />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/deals/new"
           element={
-            <ProtectedRoute roles={['admin', 'sales']}>
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
               <RegisterDeal />
             </ProtectedRoute>
           }
         />
-        <Route path="/deals/:id" element={<DealDetail />} />
+        <Route
+          path="/deals/:id"
+          element={
+            <ProtectedRoute roles={CLIENT_DATA_ROLES}>
+              <DealDetail />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/profile" element={<Profile />} />
         <Route

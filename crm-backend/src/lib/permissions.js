@@ -2,14 +2,20 @@
 // can be unit tested without a database or an HTTP layer, and reused by both
 // route middleware and (if ever needed) the frontend's nav-hiding logic.
 //
-// Deliberately simple for a 2-10 person internal tool: every authenticated
-// user can *view* CRM records. Only writes are role-gated.
+// Companies/contacts/deals are client and pipeline data - admin/sales only,
+// including reads. A developer has no reason to browse the client database
+// or see deal values for accounts they aren't working; they see the deal/
+// company tied to their own task via the task itself (see the populate in
+// routes/tasks.js), not by reading these resources directly. User accounts
+// are an admin-only directory. Tasks and activities remain readable by any
+// authenticated role.
 
 const RESOURCES = ['company', 'contact', 'deal', 'task', 'activity', 'user'];
 
-function canRead(_role, _resource) {
-  // All authenticated roles can view every CRM resource.
-  return true;
+function canRead(role, resource) {
+  if (resource === 'user') return role === 'admin';
+  if (['company', 'contact', 'deal'].includes(resource)) return role === 'admin' || role === 'sales';
+  return true; // task, activity - any authenticated role
 }
 
 function canWrite(role, resource, context = {}) {

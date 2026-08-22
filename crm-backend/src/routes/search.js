@@ -3,10 +3,13 @@ const Company = require('../models/Company');
 const Contact = require('../models/Contact');
 const Deal = require('../models/Deal');
 const { requireAuth } = require('../middleware/auth');
+const { requireRole } = require('../middleware/requireRole');
 
 const router = express.Router();
 
-router.use(requireAuth);
+// Everything this searches (companies/contacts/deals) is admin/sales-only
+// data - see routes/companies.js, routes/contacts.js, routes/deals.js.
+router.use(requireAuth, requireRole('admin', 'sales'));
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

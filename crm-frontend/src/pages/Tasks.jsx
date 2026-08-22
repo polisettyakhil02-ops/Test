@@ -58,6 +58,11 @@ export default function Tasks() {
 
   const assigneeName = (t) => developers.find((d) => d._id === t.assigneeId)?.name || (t.assigneeId ? t.assigneeId : 'Unassigned');
   const canEditStatus = (t) => user.role === 'admin' || user.role === 'sales' || String(t.assigneeId) === String(user.id || user._id);
+  const dealLabel = (t) => {
+    if (!t.dealId) return 'Internal — no client';
+    const company = t.dealId.companyId?.name;
+    return company ? `${company} — ${t.dealId.title}` : t.dealId.title;
+  };
 
   return (
     <div>
@@ -104,6 +109,7 @@ export default function Tasks() {
             {tasks.filter((t) => t.status === status).map((t) => (
               <div className="board-card" key={t._id}>
                 <div className="board-card-title">{t.title}</div>
+                <div className="stat-label" style={{ marginBottom: '0.35rem' }}>{dealLabel(t)}</div>
                 {canAssign ? (
                   <select value={t.assigneeId || ''} onChange={(e) => reassign(t._id, e.target.value)} style={{ marginBottom: '0.4rem' }}>
                     <option value="">Unassigned</option>

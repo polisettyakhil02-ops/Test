@@ -26,22 +26,30 @@ npm run preview  # serve the production build locally
 |---|---|---|
 | `/login` | Everyone | Email/password sign-in |
 | `/` | Any role | Dashboard, scoped by role: admin/sales see pipeline value, win rate, task/stage breakdowns, recent activity; developers see only their own tasks (open/overdue/completed, by status, task list) |
-| `/companies`, `/companies/:id` | Any role (write: admin/sales) | Company directory + linked contacts/deals. Text filter, "show archived" toggle, archive/restore, CSV export |
-| `/contacts`, `/contacts/:id` | Any role (write: admin/sales) | Contact directory + activity timeline. Same filter/archive/CSV controls as companies; create rejects a duplicate email |
-| `/deals`, `/deals/:id` | Any role (write: admin/sales) | Pipeline board grouped by stage, deal detail with linked tasks + activity. Owner filter, archive/restore, CSV export; moving a deal to "lost" prompts for a reason, logged to its activity timeline |
-| `/deals/new` | Admin/sales | **Register a deal.** Pick a company, check for open deals already on that account, and either create straight away or show what's already active and require an explicit "register anyway" (logged to the new deal's activity). Pipeline's "Register deal" button leads here. |
-| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default; admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification |
+| `/companies`, `/companies/:id` | Admin/sales only | Company directory + linked contacts/deals. Text filter, "show archived" toggle, archive/restore, CSV export |
+| `/contacts`, `/contacts/:id` | Admin/sales only | Contact directory + activity timeline. Same filter/archive/CSV controls as companies; create rejects a duplicate email |
+| `/deals`, `/deals/:id` | Admin/sales only | Pipeline board grouped by stage, deal detail with linked tasks + activity. Owner filter, archive/restore, CSV export; moving a deal to "lost" prompts for a reason, logged to its activity timeline |
+| `/deals/new` | Admin/sales only | **Register a deal.** Pick a company, check for open deals already on that account, and either create straight away or show what's already active and require an explicit "register anyway" (logged to the new deal's activity). Pipeline's "Register deal" button leads here. |
+| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default, and see which client each task is for as a plain read-only label (no link into the pipeline). Admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification |
 | `/users` | Admin only | Create team accounts, activate/deactivate |
 | `/profile` | Any role | Change your own password |
 
-The header also has a **search box** (companies/contacts/deals, `src/components/SearchBar.jsx`)
-and a **notification bell** (`src/components/NotificationBell.jsx`, polls every 30s) on every
-authenticated page.
+A developer's nav doesn't show Pipeline, Companies, or Contacts at all - not
+just because there's nothing useful there, but because the backend rejects
+those requests outright (`403`). The routes are also role-gated in
+`App.jsx`, so a developer hitting one of those URLs directly gets redirected
+to the dashboard instead of landing on a raw error banner.
 
-Role-based UI (which nav links and write controls show) mirrors the
+The header also has a **search box** (companies/contacts/deals,
+`src/components/SearchBar.jsx`) - admin/sales only, since it only searches
+data a developer can't see anyway - and a **notification bell**
+(`src/components/NotificationBell.jsx`, polls every 30s, every role) on
+every authenticated page.
+
+Role-based UI (which nav links, routes, and write controls show) mirrors the
 backend's `src/lib/permissions.js` - the backend is still the source of
-truth and re-checks every write, the frontend just avoids showing controls
-a given role can't use.
+truth and re-checks every request, the frontend just avoids showing or
+routing to controls a given role can't use.
 
 ## Auth
 

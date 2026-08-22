@@ -35,7 +35,7 @@ accounts so you can see role-based behavior:
 Change these before seeding against anything but a throwaway local database.
 
 ```bash
-npm test    # 16 unit tests: password hashing, JWT, role permissions, rate limiter - no DB required
+npm test    # 18 unit tests: password hashing, JWT, role permissions, rate limiter - no DB required
 ```
 
 ## API
@@ -49,18 +49,18 @@ All routes except `/health` and `POST /api/auth/login` require
 | `POST /api/auth/login` | `{ email, password }` -> `{ token, user }` |
 | `GET /api/auth/me` | Current user |
 | `PATCH /api/auth/me/password` | Self-service password change - `{ currentPassword, newPassword }` |
-| `GET/POST/PATCH /api/users` | Admin only - manage team accounts |
-| `GET/POST/PUT/DELETE /api/companies` | Reads: any role, excludes archived unless `?archived=true`. Writes: admin/sales. `DELETE` (permanent) is admin-only |
+| `GET/POST/PATCH /api/users` | Admin only (reads included) - manage team accounts |
+| `GET/POST/PUT/DELETE /api/companies` | Admin/sales only (reads included) - developers get `403`. Excludes archived unless `?archived=true`. `DELETE` (permanent) is admin-only |
 | `PATCH /api/companies/:id/archive`, `/restore` | Soft delete/undelete - admin/sales |
-| `GET/POST/PUT/DELETE /api/contacts` | Same pattern as companies; filter by `?companyId=`; rejects a duplicate email with `409` |
+| `GET/POST/PUT/DELETE /api/contacts` | Same access pattern as companies; filter by `?companyId=`; rejects a duplicate email with `409` |
 | `PATCH /api/contacts/:id/archive`, `/restore` | Same pattern as companies |
-| `GET/POST/PUT/DELETE /api/deals` | Same pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
-| `GET /api/deals/conflicts?companyId=` | Deal registration check: open (non-won/lost, non-archived) deals already on that company, with owner and last activity - the "is someone already working this account" check before registering a new deal |
+| `GET/POST/PUT/DELETE /api/deals` | Same access pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
+| `GET /api/deals/conflicts?companyId=` | Admin/sales only. Deal registration check: open (non-won/lost, non-archived) deals already on that company, with owner and last activity - the "is someone already working this account" check before registering a new deal |
 | `PATCH /api/deals/:id/archive`, `/restore` | Same pattern as companies |
-| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role. Create/edit (including reassigning `assigneeId` on an existing task): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
+| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }` so they can see which client a task is for without needing direct access to `/api/deals` or `/api/companies`. Create/edit (including reassigning `assigneeId` on an existing task): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes, scoped to `?dealId=` or `?contactId=` |
 | `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total value, win rate, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
-| `GET /api/search?q=` | Case-insensitive name/title match across companies, contacts (name+email), and deals - up to 6 results each, archived records excluded |
+| `GET /api/search?q=` | Admin/sales only - it only searches companies/contacts/deals, all of which are already admin/sales-only. Case-insensitive name/title match, up to 6 results each, archived records excluded |
 | `GET /api/notifications` | Current user's notifications (newest first) + unread count |
 | `PATCH /api/notifications/:id/read`, `/read-all` | Mark one or all notifications read |
 
@@ -71,12 +71,20 @@ the source of truth. Summary:
 
 - **admin**: full access to everything, including user management.
 - **sales**: full CRUD on companies/contacts/deals/activities/tasks; no user management.
-- **developer**: read-only on companies/contacts/deals; can only update the
-  status of tasks assigned to them; can log activities.
+- **developer**: no access to companies, contacts, the pipeline, or the user
+  directory (`GET` included - this is enforced on the backend, not just
+  hidden in the UI). Can only update the status of tasks assigned to them,
+  and log activities. Sees which client a task belongs to through the task
+  itself (`dealId` populated with the deal title and company name), not by
+  browsing the client database.
 
-All authenticated users can *view* every CRM resource - there's no per-record
-ownership restriction in v1, since this is built for a small (2-10 person)
-trusted internal team.
+Companies/contacts/deals aren't visible to every role by default - only
+admin and sales have any reason to see client data or deal values. Task and
+activity records stay readable by any authenticated role, since that's the
+information a developer actually needs day to day. There's still no
+per-record ownership restriction *within* a role (e.g. one sales rep can see
+another's deals) - deliberately simple for a 2-10 person trusted team, but
+worth revisiting if the team grows.
 
 ## Data model
 

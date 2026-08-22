@@ -5,7 +5,8 @@ const { requireRole } = require('../middleware/requireRole');
 
 const router = express.Router();
 
-router.use(requireAuth);
+// Same reasoning as routes/companies.js - contact data is admin/sales only.
+router.use(requireAuth, requireRole('admin', 'sales'));
 
 router.get('/', async (req, res, next) => {
   try {
@@ -28,7 +29,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
+router.post('/', async (req, res, next) => {
   try {
     const { name, email, phone, companyId, notes } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
@@ -47,7 +48,7 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
+router.put('/:id', async (req, res, next) => {
   try {
     const { name, email, phone, companyId, notes } = req.body || {};
 
@@ -70,7 +71,7 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
-router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/archive', async (req, res, next) => {
   try {
     const contact = await Contact.findByIdAndUpdate(req.params.id, { archived: true }, { new: true });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
@@ -80,7 +81,7 @@ router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, nex
   }
 });
 
-router.patch('/:id/restore', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/restore', async (req, res, next) => {
   try {
     const contact = await Contact.findByIdAndUpdate(req.params.id, { archived: false }, { new: true });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
