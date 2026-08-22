@@ -1,0 +1,28 @@
+{
+  "name": "dominare-crm-backend",
+  "version": "1.0.0",
+  "description": "Dominare Tech CRM API - leads/pipeline, contacts, companies, and developer task tracking for a small internal team.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/data/seed.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.5.1",
+    "multer": "^2.2.0",
+    "open-graph-scraper": "^6.12.0",
+    "socket.io": "^4.8.3"
+  },
+  "license": "MIT"
+}

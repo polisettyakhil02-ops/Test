@@ -1,0 +1,832 @@
+/* ---------- Theme tokens ----------
+   Every color in this file is a var() against these tokens, so the app-wide
+   dark/light switch (src/lib/theme.js, toggled from Layout.jsx and Login.jsx)
+   is just this one block redefining itself under [data-theme="dark"] -
+   nothing else in this stylesheet, or any page, needs to know a theme
+   exists. Dark values are contrast-checked (WCAG-ish spot checks against
+   --color-bg #0c0d10 / --color-surface #16171c): body text 16.2:1, muted
+   text 6.6:1, primary as a white-text button fill 4.7:1, status colors on
+   their own -bg tokens all 6:1+. */
+:root {
+  --color-bg: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-surface-alt: #fafbfc;
+  --color-border: #dfe3e8;
+  --color-text: #1f2430;
+  --color-muted: #6b7280;
+  --color-primary: #2952e3;
+  --color-primary-dark: #1e3fb8;
+  --color-danger: #c0392b;
+  --color-danger-bg: #fdecea;
+  --color-danger-border: #f5c6c1;
+  /* Same amber already used for medium-severity badges/proposal-stage
+     pills - formalized as a token so the dashboard's "yellow" alerts match
+     the rest of the app instead of introducing a new hue. */
+  --color-warning: #a8630c;
+  --color-warning-bg: #fff4e0;
+  --color-warning-border: #f2ddb0;
+  --color-success: #1e7a34;
+  --color-success-bg: #e3f6e5;
+  --color-info: #1e3fb8;
+  --color-info-bg: #e6ecff;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --shadow: 0 8px 24px -12px rgba(15, 15, 20, 0.25);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #0c0d10;
+  --color-surface: #16171c;
+  --color-surface-alt: #1c1e24;
+  --color-border: #2b2d35;
+  --color-text: #e9eaed;
+  --color-muted: #93969f;
+  /* Hover state brightens rather than darkens in dark mode - darkening
+     toward black would lose contrast against an already-dark page. */
+  --color-primary: #5568e0;
+  --color-primary-dark: #6b7ce8;
+  --color-danger: #ec8579;
+  --color-danger-bg: #351917;
+  --color-danger-border: #5a2b26;
+  --color-warning: #e3ac52;
+  --color-warning-bg: #362912;
+  --color-warning-border: #55431c;
+  --color-success: #71cd93;
+  --color-success-bg: #142819;
+  --color-info: #93aaf2;
+  --color-info-bg: #1a2140;
+  --shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+a {
+  color: var(--color-primary);
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+/* Every text input/select/textarea in the app relies on this - none of the
+   per-page form styles below set background/color themselves, they only add
+   border/padding on top of it. Without this, dark mode would leave every
+   form field a plain white browser-default box. */
+input, select, textarea {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--color-muted);
+  opacity: 1;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+}
+
+button.primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+button.primary:hover {
+  background: var(--color-primary-dark);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.theme-toggle {
+  font-size: 0.8rem;
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  color: var(--color-muted);
+}
+
+.theme-toggle:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: row;
+  min-height: 100vh;
+}
+
+/* ---------- Sidebar ---------- */
+
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-x: hidden;
+  transition: width 0.2s ease;
+}
+
+.sidebar-collapsed .sidebar {
+  width: 64px;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 1.1rem 1.1rem 0.9rem;
+  flex-shrink: 0;
+}
+
+.sidebar-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--color-primary);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.sidebar-mark::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 2px solid white;
+  border-radius: 3px;
+  opacity: 0.85;
+}
+
+.sidebar-brand-text {
+  font-weight: 700;
+  font-size: 1.05rem;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar-collapsed .sidebar-brand-text {
+  opacity: 0;
+  width: 0;
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.4rem 0.7rem 1rem;
+}
+
+.sidebar-section {
+  margin-bottom: 1.1rem;
+}
+
+.sidebar-collapsed .sidebar-section:not(:first-child) {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.6rem;
+}
+
+.sidebar-section-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted);
+  font-weight: 600;
+  padding: 0.3rem 0.6rem 0.4rem;
+  white-space: nowrap;
+}
+
+.sidebar-collapsed .sidebar-section-label {
+  height: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.6rem;
+  margin-bottom: 0.15rem;
+  border-radius: 7px;
+  color: var(--color-muted);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+  white-space: nowrap;
+  position: relative;
+}
+
+.sidebar-link:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+.sidebar-link.active {
+  background: var(--color-info-bg);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.sidebar-link.active::before {
+  content: '';
+  position: absolute;
+  left: -0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 3px 3px 0;
+  background: var(--color-primary);
+}
+
+.sidebar-link-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.sidebar-link-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-collapsed .sidebar-link-label {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-link {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar-collapsed .sidebar-link.active::before {
+  left: 0;
+}
+
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0.7rem 0.9rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+
+.sidebar-collapsed .sidebar-collapse-btn {
+  justify-content: center;
+  width: 40px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0.5rem;
+}
+
+/* ---------- Top header (minimal - search, theme, notifications, user) ---------- */
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-header-spacer {
+  flex: 1;
+}
+
+.app-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.app-user a {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.app-user a:hover {
+  text-decoration: underline;
+}
+
+.app-user-logout-icon {
+  width: 15px;
+  height: 15px;
+  vertical-align: -2px;
+  margin-right: 0.3rem;
+}
+
+/* ---------- Search ---------- */
+
+.search-box {
+  position: relative;
+  width: 300px;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 0.4rem 2.8rem 0.4rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.search-kbd-hint {
+  position: absolute;
+  top: 50%;
+  right: 0.5rem;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--color-muted);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  pointer-events: none;
+}
+
+.search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 0.5rem;
+  max-height: 360px;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.search-group h4 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.search-group button, .notif-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.35rem 0.4rem;
+  border-radius: 5px;
+  font-size: 0.88rem;
+}
+
+.search-group button:hover, .notif-item:hover {
+  background: var(--color-bg);
+}
+
+.search-empty {
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  padding: 0.4rem;
+  margin: 0;
+}
+
+/* ---------- Notifications ---------- */
+
+.notif-box {
+  position: relative;
+}
+
+.notif-bell {
+  position: relative;
+  border: none;
+  background: none;
+  font-size: 1.1rem;
+  padding: 0.2rem 0.4rem;
+}
+
+.notif-count {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: var(--color-danger);
+  color: white;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 300px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 0.5rem;
+  max-height: 360px;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.notif-dropdown-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.4rem 0.5rem;
+}
+
+.notif-dropdown-head button {
+  border: none;
+  background: none;
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--color-primary);
+  padding: 0;
+}
+
+.notif-item.unread {
+  font-weight: 600;
+  background: var(--color-info-bg);
+}
+
+/* ---------- List filter bars ---------- */
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.filter-bar input[type="search"], .filter-bar select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.filter-bar label {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+tr.archived-row {
+  opacity: 0.6;
+}
+
+.app-content {
+  padding: 1.5rem;
+  flex: 1;
+}
+
+.page-loading {
+  padding: 2rem;
+  color: var(--color-muted);
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+th {
+  background: var(--color-surface-alt);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--color-surface-alt);
+}
+
+.form-grid {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 480px;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.form-grid input, .form-grid select, .form-grid textarea {
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.error-banner {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger-border);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: var(--color-bg);
+}
+
+.login-card {
+  width: 320px;
+}
+
+.login-theme-toggle {
+  font-size: 0.8rem;
+}
+
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
+  gap: 1rem;
+  overflow-x: auto;
+}
+
+.board-column {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 200px;
+}
+
+.board-column h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.board-card {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.board-card .board-card-title {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+
+.board-card select {
+  margin-top: 0.4rem;
+  width: 100%;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+.badge-stage-won { background: var(--color-success-bg); color: var(--color-success); }
+.badge-stage-lost { background: var(--color-danger-bg); color: var(--color-danger); }
+.badge-stage-proposal { background: var(--color-warning-bg); color: var(--color-warning); }
+
+.badge-task-done { background: var(--color-success-bg); color: var(--color-success); }
+.badge-task-in_review { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge-task-in_progress { background: var(--color-info-bg); color: var(--color-info); }
+
+.badge-lead-stage-qualified { background: var(--color-success-bg); color: var(--color-success); }
+.badge-lead-stage-nurturing { background: var(--color-info-bg); color: var(--color-info); }
+.badge-lead-stage-disqualified { background: var(--color-danger-bg); color: var(--color-danger); }
+
+.badge-severity-low { background: var(--color-surface-alt); color: var(--color-text); }
+.badge-severity-medium { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge-severity-high { background: var(--color-danger-bg); color: var(--color-danger); }
+.badge-severity-critical { background: var(--color-danger-bg); color: var(--color-danger); font-weight: 600; }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-tile {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.stat-tile .stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.stat-tile .stat-label {
+  color: var(--color-muted);
+  font-size: 0.85rem;
+}
+
+.activity-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.activity-feed li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.activity-feed li:last-child {
+  border-bottom: none;
+}
+
+/* ---------- Smart Analysis dashboard ---------- */
+
+.dashboard-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.action-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+/* Status color is never the only signal - each item pairs its color with a
+   category label (e.g. "Rotting deal") and the dot never appears alone. */
+.action-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.action-item.severity-red { background: var(--color-danger-bg); border-color: var(--color-danger-border); }
+.action-item.severity-yellow { background: var(--color-warning-bg); border-color: var(--color-warning-border); }
+
+.action-item .action-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 0.35rem;
+  flex-shrink: 0;
+}
+
+.action-item.severity-red .action-dot { background: var(--color-danger); }
+.action-item.severity-yellow .action-dot { background: var(--color-warning); }
+
+.action-item .action-body { flex: 1; min-width: 0; }
+
+.action-item .action-category {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.action-item.severity-red .action-category { color: var(--color-danger); }
+.action-item.severity-yellow .action-category { color: var(--color-warning); }
+
+.action-item .action-title { font-weight: 600; margin-top: 0.1rem; }
+.action-item .action-detail { color: var(--color-muted); font-size: 0.85rem; margin-top: 0.15rem; }
+
+.action-empty {
+  color: var(--color-muted);
+  text-align: center;
+  padding: 1.5rem;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+}
+
+.split-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 860px) {
+  .split-view { grid-template-columns: 1fr; }
+}
+
+.stalled-list, .blocker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stalled-list li, .blocker-list li {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.stalled-list li:last-child, .blocker-list li:last-child {
+  border-bottom: none;
+}
+
+.stalled-list .row-title, .blocker-list .row-title { font-weight: 600; }
+.stalled-list .row-meta, .blocker-list .row-meta { color: var(--color-muted); font-size: 0.8rem; margin-top: 0.1rem; }
+
+.velocity-table { font-size: 0.85rem; }
+.velocity-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
