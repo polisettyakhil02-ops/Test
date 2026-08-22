@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { TASK_STATUSES, TaskStatusBadge } from '../components/TaskStatusBadge';
+import { DndBoard } from '../components/DndBoard';
 
 export default function Tasks() {
   const { user } = useAuth();
@@ -103,36 +104,43 @@ export default function Tasks() {
         </form>
       )}
 
-      <div className="board">
-        {TASK_STATUSES.map((status) => (
-          <div className="board-column" key={status}>
-            <h3>{status} ({tasks.filter((t) => t.status === status).length})</h3>
-            {tasks.filter((t) => t.status === status).map((t) => (
-              <div className="board-card" key={t._id}>
-                <div className="board-card-title">{t.title}</div>
-                <div className="stat-label" style={{ marginBottom: '0.35rem' }}>{dealLabel(t)}</div>
-                {canAssign ? (
-                  <select value={t.assigneeId || ''} onChange={(e) => reassign(t._id, e.target.value)} style={{ marginBottom: '0.4rem' }}>
-                    <option value="">Unassigned</option>
-                    {developers.map((d) => (
-                      <option key={d._id} value={d._id}>{d.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="stat-label">{assigneeName(t)}</div>
-                )}
-                {canEditStatus(t) && (
-                  <select value={t.status} onChange={(e) => setStatus(t._id, e.target.value)}>
-                    {TASK_STATUSES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            ))}
+      <DndBoard
+        columns={TASK_STATUSES.map((status) => ({ key: status }))}
+        items={tasks}
+        getItemId={(t) => t._id}
+        getItemColumn={(t) => t.status}
+        onMove={(taskId, status) => setStatus(taskId, status)}
+        canDrag={(t) => canEditStatus(t)}
+        renderColumnHeader={(col, items) => <h3>{col.key} ({items.length})</h3>}
+        renderCard={(t) => (
+          <div className="board-card">
+            <div className="board-card-title">{t.title}</div>
+            <div className="stat-label" style={{ marginBottom: '0.35rem' }}>{dealLabel(t)}</div>
+            {canAssign ? (
+              <select
+                value={t.assigneeId || ''}
+                onChange={(e) => reassign(t._id, e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{ marginBottom: '0.4rem' }}
+              >
+                <option value="">Unassigned</option>
+                {developers.map((d) => (
+                  <option key={d._id} value={d._id}>{d.name}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="stat-label">{assigneeName(t)}</div>
+            )}
+            {canEditStatus(t) && (
+              <select value={t.status} onChange={(e) => setStatus(t._id, e.target.value)} onPointerDown={(e) => e.stopPropagation()}>
+                {TASK_STATUSES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            )}
           </div>
-        ))}
-      </div>
+        )}
+      />
     </div>
   );
 }

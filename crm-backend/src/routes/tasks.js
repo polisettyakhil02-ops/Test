@@ -5,6 +5,7 @@ const { STATUSES } = require('../models/Task');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
 const { canWrite } = require('../lib/permissions');
+const { logAudit } = require('../lib/audit');
 
 const router = express.Router();
 
@@ -13,6 +14,16 @@ const router = express.Router();
 // and company are populated inline here - enough context to know which
 // client a task is for, without exposing the wider pipeline.
 const DEAL_CONTEXT_POPULATE = { path: 'dealId', select: 'title companyId', populate: { path: 'companyId', select: 'name' } };
+
+// Same rule as status updates: admin/sales always, or the assignee working
+// their own task.
+function canEditTaskWork(req, task) {
+  return (
+    req.user.role === 'admin' ||
+    req.user.role === 'sales' ||
+    canWrite('developer', 'task', { assigneeId: task.assigneeId, userId: req.user.id })
+  );
+}
 
 router.use(requireAuth);
 
@@ -63,6 +74,8 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       });
     }
 
+    await logAudit({ entityType: 'task', entityId: task._id, action: 'created', actorId: req.user.id });
+
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -91,6 +104,14 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
       });
     }
 
+    await logAudit({
+      entityType: 'task',
+      entityId: task._id,
+      action: reassigned ? 'reassigned' : 'updated',
+      actorId: req.user.id,
+      changes: reassigned ? { from: previous.assigneeId, to: task.assigneeId } : undefined,
+    });
+
     res.json({ task });
   } catch (err) {
     next(err);
@@ -106,15 +127,71 @@ router.patch('/:id/status', async (req, res, next) => {
 
     const task = await Task.findById(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (!canEditTaskWork(req, task)) return res.status(403).json({ error: 'Forbidden' });
 
-    const allowed =
-      req.user.role === 'admin' ||
-      req.user.role === 'sales' ||
-      canWrite('developer', 'task', { assigneeId: task.assigneeId, userId: req.user.id });
-
-    if (!allowed) return res.status(403).json({ error: 'Forbidden' });
-
+    const previousStatus = task.status;
     task.status = status;
+    await task.save();
+    await logAudit({
+      entityType: 'task',
+      entityId: task._id,
+      action: 'status_changed',
+      actorId: req.user.id,
+      changes: { from: previousStatus, to: status },
+    });
+    res.json({ task });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/subtasks', async (req, res, next) => {
+  try {
+    const { title } = req.body || {};
+    if (!title || !title.trim()) return res.status(400).json({ error: 'title is required' });
+
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (!canEditTaskWork(req, task)) return res.status(403).json({ error: 'Forbidden' });
+
+    task.subtasks.push({ title: title.trim(), done: false });
+    await task.save();
+    res.status(201).json({ task });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/:id/subtasks/:subtaskId', async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (!canEditTaskWork(req, task)) return res.status(403).json({ error: 'Forbidden' });
+
+    const subtask = task.subtasks.id(req.params.subtaskId);
+    if (!subtask) return res.status(404).json({ error: 'Subtask not found' });
+
+    const { done, title } = req.body || {};
+    if (done !== undefined) subtask.done = done;
+    if (title !== undefined && title.trim()) subtask.title = title.trim();
+
+    await task.save();
+    res.json({ task });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/subtasks/:subtaskId', async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (!canEditTaskWork(req, task)) return res.status(403).json({ error: 'Forbidden' });
+
+    const subtask = task.subtasks.id(req.params.subtaskId);
+    if (!subtask) return res.status(404).json({ error: 'Subtask not found' });
+
+    task.subtasks.pull({ _id: req.params.subtaskId });
     await task.save();
     res.json({ task });
   } catch (err) {
@@ -126,6 +203,7 @@ router.delete('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
     const task = await Task.findByIdAndDelete(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
+    await logAudit({ entityType: 'task', entityId: task._id, action: 'deleted', actorId: req.user.id });
     res.status(204).end();
   } catch (err) {
     next(err);

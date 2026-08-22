@@ -14,3 +14,6 @@ crm-frontend/.env
 
 # crm-frontend production build output
 crm-frontend/dist/
+
+# crm-backend uploaded file attachments (local-disk storage adapter)
+crm-backend/uploads/

@@ -5,6 +5,7 @@ const Notification = require('../models/Notification');
 const { STAGES } = require('../models/Deal');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
+const { logAudit } = require('../lib/audit');
 
 const router = express.Router();
 
@@ -97,6 +98,14 @@ router.post('/', async (req, res, next) => {
       });
     }
 
+    await logAudit({
+      entityType: 'deal',
+      entityId: deal._id,
+      action: 'created',
+      actorId: req.user.id,
+      changes: registeredDespiteConflict ? { registeredDespiteConflict: true } : undefined,
+    });
+
     res.status(201).json({ deal });
   } catch (err) {
     next(err);
@@ -112,6 +121,7 @@ router.put('/:id', async (req, res, next) => {
       { new: true, runValidators: true }
     );
     if (!deal) return res.status(404).json({ error: 'Deal not found' });
+    await logAudit({ entityType: 'deal', entityId: deal._id, action: 'updated', actorId: req.user.id });
     res.json({ deal });
   } catch (err) {
     next(err);
@@ -135,6 +145,14 @@ router.patch('/:id/stage', async (req, res, next) => {
     if (stage === 'lost' && reason) body += ` — reason: ${reason}`;
     await Activity.create({ type: 'stage_change', body, dealId: deal._id, authorId: req.user.id });
 
+    await logAudit({
+      entityType: 'deal',
+      entityId: deal._id,
+      action: 'stage_changed',
+      actorId: req.user.id,
+      changes: { from: previousStage, to: stage, reason: reason || undefined },
+    });
+
     if (deal.ownerId && String(deal.ownerId) !== String(req.user.id)) {
       await Notification.create({
         userId: deal.ownerId,
@@ -154,6 +172,7 @@ router.patch('/:id/archive', async (req, res, next) => {
   try {
     const deal = await Deal.findByIdAndUpdate(req.params.id, { archived: true }, { new: true });
     if (!deal) return res.status(404).json({ error: 'Deal not found' });
+    await logAudit({ entityType: 'deal', entityId: deal._id, action: 'archived', actorId: req.user.id });
     res.json({ deal });
   } catch (err) {
     next(err);
@@ -164,6 +183,7 @@ router.patch('/:id/restore', async (req, res, next) => {
   try {
     const deal = await Deal.findByIdAndUpdate(req.params.id, { archived: false }, { new: true });
     if (!deal) return res.status(404).json({ error: 'Deal not found' });
+    await logAudit({ entityType: 'deal', entityId: deal._id, action: 'restored', actorId: req.user.id });
     res.json({ deal });
   } catch (err) {
     next(err);
@@ -174,6 +194,7 @@ router.delete('/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const deal = await Deal.findByIdAndDelete(req.params.id);
     if (!deal) return res.status(404).json({ error: 'Deal not found' });
+    await logAudit({ entityType: 'deal', entityId: deal._id, action: 'deleted', actorId: req.user.id });
     res.status(204).end();
   } catch (err) {
     next(err);

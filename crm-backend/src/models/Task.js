@@ -3,6 +3,14 @@ const mongoose = require('mongoose');
 const STATUSES = ['todo', 'in_progress', 'in_review', 'done'];
 const PRIORITIES = ['low', 'medium', 'high'];
 
+const subtaskSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    done: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
 const taskSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
@@ -15,6 +23,7 @@ const taskSchema = new mongoose.Schema(
     // sales pipeline.
     dealId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deal', default: null },
     dueDate: { type: Date },
+    subtasks: { type: [subtaskSchema], default: [] },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }

@@ -30,7 +30,7 @@ npm run preview  # serve the production build locally
 | `/contacts`, `/contacts/:id` | Admin/sales only | Contact directory + activity timeline. Same filter/archive/CSV controls as companies; create rejects a duplicate email |
 | `/deals`, `/deals/:id` | Admin/sales only | Pipeline board grouped by stage, deal detail with linked tasks + activity. Owner filter, archive/restore, CSV export; moving a deal to "lost" prompts for a reason, logged to its activity timeline |
 | `/deals/new` | Admin/sales only | **Register a deal.** Pick a company, check for open deals already on that account, and either create straight away or show what's already active and require an explicit "register anyway" (logged to the new deal's activity). Pipeline's "Register deal" button leads here. |
-| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default, and see which client each task is for as a plain read-only label (no link into the pipeline). Admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification |
+| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default, and see which client each task is for as a plain read-only label (no link into the pipeline). Admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification. Both this board and the Pipeline board support **drag-and-drop** (`src/components/DndBoard.jsx`) to move a card between columns, in addition to the status/stage dropdown each card still has |
 | `/users` | Admin only | Create team accounts, activate/deactivate |
 | `/profile` | Any role | Change your own password |
 
@@ -50,6 +50,12 @@ Role-based UI (which nav links, routes, and write controls show) mirrors the
 backend's `src/lib/permissions.js` - the backend is still the source of
 truth and re-checks every request, the frontend just avoids showing or
 routing to controls a given role can't use.
+
+**Backend-only so far, no UI yet:** subtask checklists, file attachments,
+and per-task comment threads (`POST /api/tasks/:id/subtasks`,
+`POST /api/attachments`, `POST /api/activities` with `taskId`) all exist and
+work against the API, but there's no task detail page to surface them from -
+today a task is only ever a board card. That's next.
 
 ## Auth
 

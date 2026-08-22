@@ -2,6 +2,7 @@ const express = require('express');
 const Contact = require('../models/Contact');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
+const { logAudit } = require('../lib/audit');
 
 const router = express.Router();
 
@@ -42,6 +43,7 @@ router.post('/', async (req, res, next) => {
     }
 
     const contact = await Contact.create({ name, email, phone, companyId: companyId || null, notes, createdBy: req.user.id });
+    await logAudit({ entityType: 'contact', entityId: contact._id, action: 'created', actorId: req.user.id });
     res.status(201).json({ contact });
   } catch (err) {
     next(err);
@@ -65,6 +67,7 @@ router.put('/:id', async (req, res, next) => {
       { new: true, runValidators: true }
     );
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    await logAudit({ entityType: 'contact', entityId: contact._id, action: 'updated', actorId: req.user.id });
     res.json({ contact });
   } catch (err) {
     next(err);
@@ -75,6 +78,7 @@ router.patch('/:id/archive', async (req, res, next) => {
   try {
     const contact = await Contact.findByIdAndUpdate(req.params.id, { archived: true }, { new: true });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    await logAudit({ entityType: 'contact', entityId: contact._id, action: 'archived', actorId: req.user.id });
     res.json({ contact });
   } catch (err) {
     next(err);
@@ -85,6 +89,7 @@ router.patch('/:id/restore', async (req, res, next) => {
   try {
     const contact = await Contact.findByIdAndUpdate(req.params.id, { archived: false }, { new: true });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    await logAudit({ entityType: 'contact', entityId: contact._id, action: 'restored', actorId: req.user.id });
     res.json({ contact });
   } catch (err) {
     next(err);
@@ -95,6 +100,7 @@ router.delete('/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const contact = await Contact.findByIdAndDelete(req.params.id);
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    await logAudit({ entityType: 'contact', entityId: contact._id, action: 'deleted', actorId: req.user.id });
     res.status(204).end();
   } catch (err) {
     next(err);

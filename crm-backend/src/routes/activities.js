@@ -6,14 +6,28 @@ const router = express.Router();
 
 router.use(requireAuth);
 
+// dealId/contactId activities are client data, same restriction as the
+// records themselves (routes/deals.js, routes/contacts.js). taskId
+// activities (a task's comment thread) stay open to any authenticated role,
+// same as the task itself.
+function canAccessClientActivity(req) {
+  return req.user.role === 'admin' || req.user.role === 'sales';
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const filter = {};
     if (req.query.dealId) filter.dealId = req.query.dealId;
     if (req.query.contactId) filter.contactId = req.query.contactId;
-    if (!filter.dealId && !filter.contactId) {
-      return res.status(400).json({ error: 'dealId or contactId query param is required' });
+    if (req.query.taskId) filter.taskId = req.query.taskId;
+
+    if (!filter.dealId && !filter.contactId && !filter.taskId) {
+      return res.status(400).json({ error: 'dealId, contactId, or taskId query param is required' });
     }
+    if ((filter.dealId || filter.contactId) && !canAccessClientActivity(req)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const activities = await Activity.find(filter).sort({ createdAt: -1 });
     res.json({ activities });
   } catch (err) {
@@ -23,16 +37,21 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { type, body, dealId, contactId } = req.body || {};
+    const { type, body, dealId, contactId, taskId } = req.body || {};
     if (!body) return res.status(400).json({ error: 'body is required' });
-    if (!dealId && !contactId) {
-      return res.status(400).json({ error: 'dealId or contactId is required' });
+    if (!dealId && !contactId && !taskId) {
+      return res.status(400).json({ error: 'dealId, contactId, or taskId is required' });
     }
+    if ((dealId || contactId) && !canAccessClientActivity(req)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const activity = await Activity.create({
-      type: type || 'note',
+      type: type || (taskId ? 'comment' : 'note'),
       body,
       dealId: dealId || null,
       contactId: contactId || null,
+      taskId: taskId || null,
       authorId: req.user.id,
     });
     res.status(201).json({ activity });

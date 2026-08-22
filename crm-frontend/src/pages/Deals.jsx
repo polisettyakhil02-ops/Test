@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { DEAL_STAGES } from '../components/StageBadge';
 import { downloadCsv } from '../lib/csv';
+import { DndBoard } from '../components/DndBoard';
 
 export default function Deals() {
   const { user } = useAuth();
@@ -107,33 +108,40 @@ export default function Deals() {
         </label>
       </div>
 
-      <div className="board">
-        {DEAL_STAGES.map((stage) => (
-          <div className="board-column" key={stage}>
-            <h3>{stage} ({visibleDeals.filter((d) => d.stage === stage).length})</h3>
-            {visibleDeals.filter((d) => d.stage === stage).map((d) => (
-              <div className="board-card" key={d._id}>
-                <div className="board-card-title">
-                  <Link to={`/deals/${d._id}`}>{d.title}</Link>
-                </div>
-                <div>${d.value.toLocaleString()}</div>
-                {canWrite && !showArchived && (
-                  <select value={d.stage} onChange={(e) => moveStage(d._id, e.target.value)}>
-                    {DEAL_STAGES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                )}
-                {canWrite && (
-                  <button type="button" style={{ marginTop: '0.4rem', width: '100%' }} onClick={() => (d.archived ? restore(d._id) : archive(d._id))}>
-                    {d.archived ? 'Restore' : 'Archive'}
-                  </button>
-                )}
-              </div>
-            ))}
+      <DndBoard
+        columns={DEAL_STAGES.map((stage) => ({ key: stage }))}
+        items={visibleDeals}
+        getItemId={(d) => d._id}
+        getItemColumn={(d) => d.stage}
+        onMove={(dealId, stage) => moveStage(dealId, stage)}
+        canDrag={() => canWrite && !showArchived}
+        renderColumnHeader={(col, items) => <h3>{col.key} ({items.length})</h3>}
+        renderCard={(d) => (
+          <div className="board-card">
+            <div className="board-card-title" onPointerDown={(e) => e.stopPropagation()}>
+              <Link to={`/deals/${d._id}`}>{d.title}</Link>
+            </div>
+            <div>${d.value.toLocaleString()}</div>
+            {canWrite && !showArchived && (
+              <select value={d.stage} onChange={(e) => moveStage(d._id, e.target.value)} onPointerDown={(e) => e.stopPropagation()}>
+                {DEAL_STAGES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            )}
+            {canWrite && (
+              <button
+                type="button"
+                style={{ marginTop: '0.4rem', width: '100%' }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => (d.archived ? restore(d._id) : archive(d._id))}
+              >
+                {d.archived ? 'Restore' : 'Archive'}
+              </button>
+            )}
           </div>
-        ))}
-      </div>
+        )}
+      />
     </div>
   );
 }
