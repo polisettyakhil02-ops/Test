@@ -1,6 +1,7 @@
 const express = require('express');
 const Deal = require('../models/Deal');
 const Activity = require('../models/Activity');
+const Notification = require('../models/Notification');
 const { STAGES } = require('../models/Deal');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
@@ -11,7 +12,7 @@ router.use(requireAuth);
 
 router.get('/', async (req, res, next) => {
   try {
-    const filter = {};
+    const filter = req.query.archived === 'true' ? { archived: true } : { archived: false };
     if (req.query.stage) filter.stage = req.query.stage;
     if (req.query.ownerId) filter.ownerId = req.query.ownerId;
     if (req.query.companyId) filter.companyId = req.query.companyId;
@@ -69,7 +70,7 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
 
 router.patch('/:id/stage', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
-    const { stage } = req.body || {};
+    const { stage, reason } = req.body || {};
     if (!STAGES.includes(stage)) {
       return res.status(400).json({ error: `stage must be one of: ${STAGES.join(', ')}` });
     }
@@ -80,12 +81,18 @@ router.patch('/:id/stage', requireRole('admin', 'sales'), async (req, res, next)
     deal.stage = stage;
     await deal.save();
 
-    await Activity.create({
-      type: 'stage_change',
-      body: `Stage changed from "${previousStage}" to "${stage}"`,
-      dealId: deal._id,
-      authorId: req.user.id,
-    });
+    let body = `Stage changed from "${previousStage}" to "${stage}"`;
+    if (stage === 'lost' && reason) body += ` — reason: ${reason}`;
+    await Activity.create({ type: 'stage_change', body, dealId: deal._id, authorId: req.user.id });
+
+    if (deal.ownerId && String(deal.ownerId) !== String(req.user.id)) {
+      await Notification.create({
+        userId: deal.ownerId,
+        type: 'deal_stage_changed',
+        message: `"${deal.title}" moved from ${previousStage} to ${stage}`,
+        link: `/deals/${deal._id}`,
+      });
+    }
 
     res.json({ deal });
   } catch (err) {
@@ -93,7 +100,27 @@ router.patch('/:id/stage', requireRole('admin', 'sales'), async (req, res, next)
   }
 });
 
-router.delete('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, next) => {
+  try {
+    const deal = await Deal.findByIdAndUpdate(req.params.id, { archived: true }, { new: true });
+    if (!deal) return res.status(404).json({ error: 'Deal not found' });
+    res.json({ deal });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/:id/restore', requireRole('admin', 'sales'), async (req, res, next) => {
+  try {
+    const deal = await Deal.findByIdAndUpdate(req.params.id, { archived: false }, { new: true });
+    if (!deal) return res.status(404).json({ error: 'Deal not found' });
+    res.json({ deal });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const deal = await Deal.findByIdAndDelete(req.params.id);
     if (!deal) return res.status(404).json({ error: 'Deal not found' });

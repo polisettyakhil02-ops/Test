@@ -7,9 +7,10 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const companies = await Company.find().sort({ name: 1 });
+    const filter = req.query.archived === 'true' ? { archived: true } : { archived: false };
+    const companies = await Company.find(filter).sort({ name: 1 });
     res.json({ companies });
   } catch (err) {
     next(err);
@@ -52,7 +53,27 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
+router.patch('/:id/archive', requireRole('admin', 'sales'), async (req, res, next) => {
+  try {
+    const company = await Company.findByIdAndUpdate(req.params.id, { archived: true }, { new: true });
+    if (!company) return res.status(404).json({ error: 'Company not found' });
+    res.json({ company });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/:id/restore', requireRole('admin', 'sales'), async (req, res, next) => {
+  try {
+    const company = await Company.findByIdAndUpdate(req.params.id, { archived: false }, { new: true });
+    if (!company) return res.status(404).json({ error: 'Company not found' });
+    res.json({ company });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const company = await Company.findByIdAndDelete(req.params.id);
     if (!company) return res.status(404).json({ error: 'Company not found' });

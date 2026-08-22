@@ -7,6 +7,7 @@ const contactSchema = new mongoose.Schema(
     phone: { type: String, trim: true },
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
     notes: { type: String, trim: true },
+    archived: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }

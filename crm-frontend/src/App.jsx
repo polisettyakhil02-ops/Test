@@ -11,6 +11,7 @@ import Deals from './pages/Deals';
 import DealDetail from './pages/DealDetail';
 import Tasks from './pages/Tasks';
 import Users from './pages/Users';
+import Profile from './pages/Profile';
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/deals" element={<Deals />} />
         <Route path="/deals/:id" element={<DealDetail />} />
         <Route path="/tasks" element={<Tasks />} />
+        <Route path="/profile" element={<Profile />} />
         <Route
           path="/users"
           element={

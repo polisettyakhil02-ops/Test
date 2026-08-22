@@ -9,6 +9,8 @@ const dealRoutes = require('./routes/deals');
 const taskRoutes = require('./routes/tasks');
 const activityRoutes = require('./routes/activities');
 const dashboardRoutes = require('./routes/dashboard');
+const notificationRoutes = require('./routes/notifications');
+const searchRoutes = require('./routes/search');
 const { errorHandler } = require('./middleware/errorHandler');
 
 function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
@@ -31,6 +33,8 @@ function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
   app.use('/api/tasks', taskRoutes);
   app.use('/api/activities', activityRoutes);
   app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/notifications', notificationRoutes);
+  app.use('/api/search', searchRoutes);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use(errorHandler);

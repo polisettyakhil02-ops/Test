@@ -1,5 +1,6 @@
 const express = require('express');
 const Task = require('../models/Task');
+const Notification = require('../models/Notification');
 const { STATUSES } = require('../models/Task');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
@@ -46,6 +47,16 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       dueDate,
       createdBy: req.user.id,
     });
+
+    if (task.assigneeId && String(task.assigneeId) !== String(req.user.id)) {
+      await Notification.create({
+        userId: task.assigneeId,
+        type: 'task_assigned',
+        message: `You were assigned "${task.title}"`,
+        link: '/tasks',
+      });
+    }
+
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -55,12 +66,25 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
 router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
     const { title, description, priority, assigneeId, dealId, dueDate } = req.body || {};
+    const previous = await Task.findById(req.params.id);
+    if (!previous) return res.status(404).json({ error: 'Task not found' });
+
     const task = await Task.findByIdAndUpdate(
       req.params.id,
       { title, description, priority, assigneeId: assigneeId || null, dealId: dealId || null, dueDate },
       { new: true, runValidators: true }
     );
-    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    const reassigned = task.assigneeId && String(task.assigneeId) !== String(previous.assigneeId || '');
+    if (reassigned && String(task.assigneeId) !== String(req.user.id)) {
+      await Notification.create({
+        userId: task.assigneeId,
+        type: 'task_assigned',
+        message: `You were assigned "${task.title}"`,
+        link: '/tasks',
+      });
+    }
+
     res.json({ task });
   } catch (err) {
     next(err);

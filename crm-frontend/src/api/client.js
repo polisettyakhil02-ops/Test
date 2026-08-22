@@ -35,6 +35,8 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
 export const api = {
   login: (email, password) => request('/api/auth/login', { method: 'POST', body: { email, password }, auth: false }),
   me: () => request('/api/auth/me'),
+  changePassword: (currentPassword, newPassword) =>
+    request('/api/auth/me/password', { method: 'PATCH', body: { currentPassword, newPassword } }),
 
   users: {
     list: () => request('/api/users'),
@@ -43,18 +45,28 @@ export const api = {
   },
 
   companies: {
-    list: () => request('/api/companies'),
+    list: (params = {}) => {
+      const qs = new URLSearchParams(params).toString();
+      return request(`/api/companies${qs ? `?${qs}` : ''}`);
+    },
     get: (id) => request(`/api/companies/${id}`),
     create: (body) => request('/api/companies', { method: 'POST', body }),
     update: (id, body) => request(`/api/companies/${id}`, { method: 'PUT', body }),
+    archive: (id) => request(`/api/companies/${id}/archive`, { method: 'PATCH' }),
+    restore: (id) => request(`/api/companies/${id}/restore`, { method: 'PATCH' }),
     remove: (id) => request(`/api/companies/${id}`, { method: 'DELETE' }),
   },
 
   contacts: {
-    list: (companyId) => request(`/api/contacts${companyId ? `?companyId=${companyId}` : ''}`),
+    list: (params = {}) => {
+      const qs = new URLSearchParams(params).toString();
+      return request(`/api/contacts${qs ? `?${qs}` : ''}`);
+    },
     get: (id) => request(`/api/contacts/${id}`),
     create: (body) => request('/api/contacts', { method: 'POST', body }),
     update: (id, body) => request(`/api/contacts/${id}`, { method: 'PUT', body }),
+    archive: (id) => request(`/api/contacts/${id}/archive`, { method: 'PATCH' }),
+    restore: (id) => request(`/api/contacts/${id}/restore`, { method: 'PATCH' }),
     remove: (id) => request(`/api/contacts/${id}`, { method: 'DELETE' }),
   },
 
@@ -66,7 +78,9 @@ export const api = {
     get: (id) => request(`/api/deals/${id}`),
     create: (body) => request('/api/deals', { method: 'POST', body }),
     update: (id, body) => request(`/api/deals/${id}`, { method: 'PUT', body }),
-    setStage: (id, stage) => request(`/api/deals/${id}/stage`, { method: 'PATCH', body: { stage } }),
+    setStage: (id, stage, reason) => request(`/api/deals/${id}/stage`, { method: 'PATCH', body: { stage, reason } }),
+    archive: (id) => request(`/api/deals/${id}/archive`, { method: 'PATCH' }),
+    restore: (id) => request(`/api/deals/${id}/restore`, { method: 'PATCH' }),
     remove: (id) => request(`/api/deals/${id}`, { method: 'DELETE' }),
   },
 
@@ -90,4 +104,12 @@ export const api = {
   },
 
   dashboard: () => request('/api/dashboard'),
+
+  search: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),
+
+  notifications: {
+    list: () => request('/api/notifications'),
+    markRead: (id) => request(`/api/notifications/${id}/read`, { method: 'PATCH' }),
+    markAllRead: () => request('/api/notifications/read-all', { method: 'PATCH' }),
+  },
 };

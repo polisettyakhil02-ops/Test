@@ -26,11 +26,16 @@ npm run preview  # serve the production build locally
 |---|---|---|
 | `/login` | Everyone | Email/password sign-in |
 | `/` | Any role | Dashboard, scoped by role: admin/sales see pipeline value, win rate, task/stage breakdowns, recent activity; developers see only their own tasks (open/overdue/completed, by status, task list) |
-| `/companies`, `/companies/:id` | Any role (write: admin/sales) | Company directory + linked contacts/deals |
-| `/contacts`, `/contacts/:id` | Any role (write: admin/sales) | Contact directory + activity timeline |
-| `/deals`, `/deals/:id` | Any role (write: admin/sales) | Pipeline board grouped by stage, deal detail with linked tasks + activity |
-| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default; admin/sales can create and assign |
+| `/companies`, `/companies/:id` | Any role (write: admin/sales) | Company directory + linked contacts/deals. Text filter, "show archived" toggle, archive/restore, CSV export |
+| `/contacts`, `/contacts/:id` | Any role (write: admin/sales) | Contact directory + activity timeline. Same filter/archive/CSV controls as companies; create rejects a duplicate email |
+| `/deals`, `/deals/:id` | Any role (write: admin/sales) | Pipeline board grouped by stage, deal detail with linked tasks + activity. Owner filter, archive/restore, CSV export; moving a deal to "lost" prompts for a reason, logged to its activity timeline |
+| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default; admin/sales can create and assign (assignee gets a notification) |
 | `/users` | Admin only | Create team accounts, activate/deactivate |
+| `/profile` | Any role | Change your own password |
+
+The header also has a **search box** (companies/contacts/deals, `src/components/SearchBar.jsx`)
+and a **notification bell** (`src/components/NotificationBell.jsx`, polls every 30s) on every
+authenticated page.
 
 Role-based UI (which nav links and write controls show) mirrors the
 backend's `src/lib/permissions.js` - the backend is still the source of

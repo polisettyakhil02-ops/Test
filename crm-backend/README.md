@@ -35,25 +35,33 @@ accounts so you can see role-based behavior:
 Change these before seeding against anything but a throwaway local database.
 
 ```bash
-npm test    # 12 unit tests: password hashing, JWT, role permissions - no DB required
+npm test    # 16 unit tests: password hashing, JWT, role permissions, rate limiter - no DB required
 ```
 
 ## API
 
 All routes except `/health` and `POST /api/auth/login` require
 `Authorization: Bearer <token>` (obtained from `/api/auth/login`).
+`POST /api/auth/login` is rate-limited to 20 attempts/minute/IP.
 
 | Endpoint | Notes |
 |---|---|
 | `POST /api/auth/login` | `{ email, password }` -> `{ token, user }` |
 | `GET /api/auth/me` | Current user |
+| `PATCH /api/auth/me/password` | Self-service password change - `{ currentPassword, newPassword }` |
 | `GET/POST/PATCH /api/users` | Admin only - manage team accounts |
-| `GET/POST/PUT/DELETE /api/companies` | Reads: any role. Writes: admin/sales |
-| `GET/POST/PUT/DELETE /api/contacts` | Same as companies; filter by `?companyId=` |
-| `GET/POST/PUT/DELETE /api/deals` | Reads: any role. Writes: admin/sales. `PATCH /:id/stage` moves the pipeline stage and logs an activity |
-| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role. Create/edit: admin/sales. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
+| `GET/POST/PUT/DELETE /api/companies` | Reads: any role, excludes archived unless `?archived=true`. Writes: admin/sales. `DELETE` (permanent) is admin-only |
+| `PATCH /api/companies/:id/archive`, `/restore` | Soft delete/undelete - admin/sales |
+| `GET/POST/PUT/DELETE /api/contacts` | Same pattern as companies; filter by `?companyId=`; rejects a duplicate email with `409` |
+| `PATCH /api/contacts/:id/archive`, `/restore` | Same pattern as companies |
+| `GET/POST/PUT/DELETE /api/deals` | Same pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
+| `PATCH /api/deals/:id/archive`, `/restore` | Same pattern as companies |
+| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role. Create/edit: admin/sales, and notifies the assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes, scoped to `?dealId=` or `?contactId=` |
 | `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total value, win rate, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
+| `GET /api/search?q=` | Case-insensitive name/title match across companies, contacts (name+email), and deals - up to 6 results each, archived records excluded |
+| `GET /api/notifications` | Current user's notifications (newest first) + unread count |
+| `PATCH /api/notifications/:id/read`, `/read-all` | Mark one or all notifications read |
 
 ## Roles & permissions
 
@@ -76,6 +84,12 @@ trusted internal team.
   -> `won`/`lost`) rather than having separate Lead and Deal models.
 - **Task** has an *optional* `dealId` - this is the "loose link" to developer
   work: a task can reference a client/deal, or stand alone as internal work.
+- **Company/Contact/Deal** have an `archived` flag rather than being hard-deleted
+  by default - list endpoints exclude archived records unless `?archived=true`.
+  Permanent `DELETE` still exists but is admin-only.
+- **Notification** is created on two events - a task being assigned, and a
+  deal's stage changing when the mover isn't the deal's owner - and read by
+  the recipient via `GET /api/notifications`.
 
 ## Before exposing this to real users
 
@@ -83,6 +97,7 @@ trusted internal team.
   dev only.
 - Restrict `CORS_ORIGIN` to your actual frontend's URL.
 - Put this behind HTTPS.
-- There's no password-reset or self-service signup flow - admins create
-  accounts via `POST /api/users`. Add one if the team grows past "admin can
-  just do it directly."
+- There's self-service password *change* (`PATCH /api/auth/me/password`) but
+  no forgot-password/email-reset flow, and no self-service signup - admins
+  create accounts via `POST /api/users`. Add a reset flow once locked-out
+  users can't just ask an admin directly.

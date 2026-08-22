@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { SearchBar } from './SearchBar';
+import { NotificationBell } from './NotificationBell';
 
 export function Layout() {
   const { user, logout } = useAuth();
@@ -16,10 +18,12 @@ export function Layout() {
           <NavLink to="/tasks">Tasks</NavLink>
           {user?.role === 'admin' && <NavLink to="/users">Users</NavLink>}
         </nav>
+        <SearchBar />
+        <NotificationBell />
         <div className="app-user">
-          <span>
+          <NavLink to="/profile">
             {user?.name} <em>({user?.role})</em>
-          </span>
+          </NavLink>
           <button type="button" onClick={logout}>
             Log out
           </button>

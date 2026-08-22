@@ -12,6 +12,7 @@ const dealSchema = new mongoose.Schema(
     source: { type: String, trim: true },
     expectedCloseDate: { type: Date },
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    archived: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
