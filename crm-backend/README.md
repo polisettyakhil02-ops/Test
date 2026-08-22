@@ -82,7 +82,7 @@ message send/receive goes over a Socket.IO connection, not REST - see
 | `PATCH /api/projects/:id/scratchpad` | Any role. Replaces the project's free-form notes/snippets dump - separate from the general `PUT` so a quick note doesn't need a full edit |
 | `PATCH /api/projects/:id/archive`, `/restore` | Same pattern as companies |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes/comments, scoped to `?dealId=`, `?contactId=`, `?leadId=`, or `?taskId=`. `dealId`/`contactId`/`leadId` activities are admin/sales only (same restriction as the records themselves); `taskId` activities (a task's comment thread) are open to any role, same as the task |
-| `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
+| `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed, plus the "Smart Analysis" additions - `actionItems`, `stageVelocity`, `funnel` - see **Smart Analysis dashboard** below. Developer: their own tasks only - by status, overdue count, task list - no pipeline value, win rate, or any of the pipeline-derived smart-analysis data |
 | `GET /api/search?q=` | Admin/sales only - it only searches companies/contacts/deals, all of which are already admin/sales-only. Case-insensitive name/title match, up to 6 results each, archived records excluded |
 | `GET /api/notifications` | Current user's notifications (newest first) + unread count |
 | `PATCH /api/notifications/:id/read`, `/read-all` | Mark one or all notifications read |
@@ -433,6 +433,61 @@ excluded since its weight is 0 anyway). Archived deals are excluded from
 `dealsByStage` entirely, matching how every other deal-listing endpoint
 already treats them.
 
+## Smart Analysis dashboard
+
+The admin/sales dashboard moved from flat descriptive tables ("here's every
+deal count") to three actionable views, all computed in a single
+`GET /api/dashboard` call. The interesting logic - severity thresholds,
+sorting, how three independent Mongo queries merge into one feed - is pure,
+DB-free code in `src/lib/dashboardInsights.js` (unit tested in
+`test/dashboardInsights.test.js`); the route (`src/routes/dashboard.js`) only
+runs the aggregations and hands the raw rows to it.
+
+**Action Center** (`actionItems`) merges three queries into one red/yellow
+feed:
+- *Rotting deals* - an open-stage deal whose newest `Activity` (or, if it has
+  none, its own `createdAt`) is older than 7 days. A `$lookup` sub-pipeline
+  pulls just the single newest activity per deal (sorted + `$limit: 1`), not
+  the whole history. 7-13 days is yellow, 14+ is red.
+- *Deals with no next step* - an open-stage deal with no non-`done` `Task`
+  pointing at it (`$lookup` sub-pipeline stops at the first match). Always
+  yellow - it's a process gap, not yet urgent.
+- *Overdue developer blockers* - a `high`/`critical` severity bug (`Task`
+  with `issueType: 'bug'`), past its `dueDate`, not `done`. `critical` is
+  red, `high` is yellow.
+
+Each source's Mongo `$sort` establishes worst-first order within its own
+results; `buildActionItems` then interleaves all three with red always
+ahead of yellow, and normalizes them into `{ id, category, severity, title,
+detail, link }` so the frontend maps over one shape without knowing which
+query an item came from.
+
+**Pipeline velocity** (`stageVelocity`) is average days spent in a stage
+*before leaving it* - not a naive read of `Deal.updatedAt` (which only ever
+reflects the most recent change, so it can't say how long a deal sat in
+`contacted` before that). It's computed from `AuditLog`'s `stage_changed`
+history instead: a `$setWindowFields`/`$shift` pipeline (**requires MongoDB
+5.0+**) pulls each audit entry's *previous* entry within the same deal
+(partitioned by `entityId`, sorted by `createdAt`); the gap between them is
+how long the deal sat in the stage it just left. A deal's first transition
+has no previous entry, so it falls back to the deal's own `createdAt`.
+`won`/`lost` are terminal - deals never leave them - so they never get a
+sample and report `avgDays: null` ("not enough data yet"), which is a
+different, real answer from `0`.
+
+**Pipeline funnel** (`funnel`) is how many deals have *ever reached* each
+stage, not how many are sitting there right now (which would undercount
+every stage a deal has since moved past). "Reached" is the union of two
+sources: `AuditLog` entries transitioning *into* a stage, and deals
+*currently* there (covering deals that have never moved, which never
+produced an audit entry at all). `new` is special-cased to the total
+non-archived deal count, since every deal starts there by schema default -
+audit-log-only counting would silently miss it, as there's no "from" stage
+on a deal's very first transition. `lost` is deliberately **not** a funnel
+stage: a deal can be lost from any open stage, so treating it as "the stage
+after proposal" would imply an ordering that doesn't exist. It's reported
+separately as `funnel.lostCount`/`funnel.lostRate` instead.
+
 ## Before exposing this to real users
 
 - Set a strong, random `JWT_SECRET` - the `.env.example` default is for local
@@ -443,3 +498,10 @@ already treats them.
   no forgot-password/email-reset flow, and no self-service signup - admins
   create accounts via `POST /api/users`. Add a reset flow once locked-out
   users can't just ask an admin directly.
+- The dashboard's stage-velocity aggregation uses `$setWindowFields`/`$shift`,
+  which needs **MongoDB 5.0+** - confirm your deployment target before
+  relying on it. It was verified against the sandbox this was built in only
+  via unit tests on the pure-logic layer and an HTTP boot test (auth/role
+  gating, no thrown errors reaching the DB call); there was no live MongoDB
+  available to run the actual aggregation end-to-end. Run it against a real
+  seeded database before shipping.
