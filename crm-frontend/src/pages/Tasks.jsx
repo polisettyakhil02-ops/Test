@@ -47,6 +47,15 @@ export default function Tasks() {
     }
   }
 
+  async function reassign(taskId, assigneeId) {
+    try {
+      await api.tasks.update(taskId, { assigneeId: assigneeId || null });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   const assigneeName = (t) => developers.find((d) => d._id === t.assigneeId)?.name || (t.assigneeId ? t.assigneeId : 'Unassigned');
   const canEditStatus = (t) => user.role === 'admin' || user.role === 'sales' || String(t.assigneeId) === String(user.id || user._id);
 
@@ -95,7 +104,16 @@ export default function Tasks() {
             {tasks.filter((t) => t.status === status).map((t) => (
               <div className="board-card" key={t._id}>
                 <div className="board-card-title">{t.title}</div>
-                <div className="stat-label">{assigneeName(t)}</div>
+                {canAssign ? (
+                  <select value={t.assigneeId || ''} onChange={(e) => reassign(t._id, e.target.value)} style={{ marginBottom: '0.4rem' }}>
+                    <option value="">Unassigned</option>
+                    {developers.map((d) => (
+                      <option key={d._id} value={d._id}>{d.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="stat-label">{assigneeName(t)}</div>
+                )}
                 {canEditStatus(t) && (
                   <select value={t.status} onChange={(e) => setStatus(t._id, e.target.value)}>
                     {TASK_STATUSES.map((s) => (

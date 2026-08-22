@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { DEAL_STAGES } from '../components/StageBadge';
@@ -7,13 +7,12 @@ import { downloadCsv } from '../lib/csv';
 
 export default function Deals() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const canWrite = user.role === 'admin' || user.role === 'sales';
   const [deals, setDeals] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [owners, setOwners] = useState([]);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({ title: '', companyId: '', value: '' });
-  const [showForm, setShowForm] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState('');
 
@@ -38,18 +37,6 @@ export default function Deals() {
     if (!ownerFilter) return deals;
     return deals.filter((d) => String(d.ownerId) === ownerFilter);
   }, [deals, ownerFilter]);
-
-  async function handleCreate(e) {
-    e.preventDefault();
-    try {
-      await api.deals.create({ ...form, companyId: form.companyId || null, value: Number(form.value) || 0 });
-      setForm({ title: '', companyId: '', value: '' });
-      setShowForm(false);
-      load(showArchived);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
 
   async function moveStage(dealId, stage) {
     let reason;
@@ -99,36 +86,11 @@ export default function Deals() {
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button type="button" onClick={exportCsv}>Export CSV</button>
           {canWrite && (
-            <button type="button" className="primary" onClick={() => setShowForm((s) => !s)}>
-              {showForm ? 'Cancel' : 'New deal'}
-            </button>
+            <button type="button" className="primary" onClick={() => navigate('/deals/new')}>Register deal</button>
           )}
         </div>
       </div>
       {error && <div className="error-banner">{error}</div>}
-
-      {showForm && (
-        <form className="form-grid card" style={{ marginBottom: '1rem' }} onSubmit={handleCreate}>
-          <label>
-            Title
-            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
-          </label>
-          <label>
-            Company
-            <select value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
-              <option value="">—</option>
-              {companies.map((c) => (
-                <option key={c._id} value={c._id}>{c.name}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Value ($)
-            <input type="number" min="0" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
-          </label>
-          <button type="submit" className="primary">Create</button>
-        </form>
-      )}
 
       <div className="filter-bar">
         {canWrite && owners.length > 0 && (

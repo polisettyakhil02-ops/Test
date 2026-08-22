@@ -23,6 +23,40 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Deal registration conflict check: is there already open activity on this
+// company? Registered before /:id so "conflicts" isn't swallowed as an id.
+router.get('/conflicts', async (req, res, next) => {
+  try {
+    const { companyId } = req.query;
+    if (!companyId) return res.status(400).json({ error: 'companyId is required' });
+
+    const openDeals = await Deal.find({ companyId, archived: false, stage: { $nin: ['won', 'lost'] } })
+      .sort({ updatedAt: -1 })
+      .populate('ownerId', 'name email');
+
+    const withActivity = await Promise.all(
+      openDeals.map(async (deal) => {
+        const lastActivity = await Activity.findOne({ dealId: deal._id }).sort({ createdAt: -1 });
+        return {
+          _id: deal._id,
+          title: deal.title,
+          stage: deal.stage,
+          value: deal.value,
+          owner: deal.ownerId,
+          updatedAt: deal.updatedAt,
+          lastActivity: lastActivity
+            ? { type: lastActivity.type, body: lastActivity.body, createdAt: lastActivity.createdAt }
+            : null,
+        };
+      })
+    );
+
+    res.json({ hasConflict: withActivity.length > 0, openDeals: withActivity });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const deal = await Deal.findById(req.params.id);
@@ -35,8 +69,10 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
-    const { title, companyId, contactId, value, source, expectedCloseDate, ownerId } = req.body || {};
+    const { title, companyId, contactId, value, source, expectedCloseDate, ownerId, registeredDespiteConflict } =
+      req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
+
     const deal = await Deal.create({
       title,
       companyId: companyId || null,
@@ -47,6 +83,16 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       ownerId: ownerId || req.user.id,
       createdBy: req.user.id,
     });
+
+    if (registeredDespiteConflict) {
+      await Activity.create({
+        type: 'note',
+        body: 'Deal registered despite existing open activity on this company.',
+        dealId: deal._id,
+        authorId: req.user.id,
+      });
+    }
+
     res.status(201).json({ deal });
   } catch (err) {
     next(err);

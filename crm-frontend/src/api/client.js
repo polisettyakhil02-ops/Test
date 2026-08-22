@@ -76,6 +76,7 @@ export const api = {
       return request(`/api/deals${qs ? `?${qs}` : ''}`);
     },
     get: (id) => request(`/api/deals/${id}`),
+    conflicts: (companyId) => request(`/api/deals/conflicts?companyId=${companyId}`),
     create: (body) => request('/api/deals', { method: 'POST', body }),
     update: (id, body) => request(`/api/deals/${id}`, { method: 'PUT', body }),
     setStage: (id, stage, reason) => request(`/api/deals/${id}/stage`, { method: 'PATCH', body: { stage, reason } }),

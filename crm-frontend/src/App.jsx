@@ -9,6 +9,7 @@ import Contacts from './pages/Contacts';
 import ContactDetail from './pages/ContactDetail';
 import Deals from './pages/Deals';
 import DealDetail from './pages/DealDetail';
+import RegisterDeal from './pages/RegisterDeal';
 import Tasks from './pages/Tasks';
 import Users from './pages/Users';
 import Profile from './pages/Profile';
@@ -30,6 +31,14 @@ export default function App() {
         <Route path="/contacts" element={<Contacts />} />
         <Route path="/contacts/:id" element={<ContactDetail />} />
         <Route path="/deals" element={<Deals />} />
+        <Route
+          path="/deals/new"
+          element={
+            <ProtectedRoute roles={['admin', 'sales']}>
+              <RegisterDeal />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/deals/:id" element={<DealDetail />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/profile" element={<Profile />} />

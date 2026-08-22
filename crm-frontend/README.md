@@ -29,7 +29,8 @@ npm run preview  # serve the production build locally
 | `/companies`, `/companies/:id` | Any role (write: admin/sales) | Company directory + linked contacts/deals. Text filter, "show archived" toggle, archive/restore, CSV export |
 | `/contacts`, `/contacts/:id` | Any role (write: admin/sales) | Contact directory + activity timeline. Same filter/archive/CSV controls as companies; create rejects a duplicate email |
 | `/deals`, `/deals/:id` | Any role (write: admin/sales) | Pipeline board grouped by stage, deal detail with linked tasks + activity. Owner filter, archive/restore, CSV export; moving a deal to "lost" prompts for a reason, logged to its activity timeline |
-| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default; admin/sales can create and assign (assignee gets a notification) |
+| `/deals/new` | Admin/sales | **Register a deal.** Pick a company, check for open deals already on that account, and either create straight away or show what's already active and require an explicit "register anyway" (logged to the new deal's activity). Pipeline's "Register deal" button leads here. |
+| `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default; admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification |
 | `/users` | Admin only | Create team accounts, activate/deactivate |
 | `/profile` | Any role | Change your own password |
 

@@ -55,8 +55,9 @@ All routes except `/health` and `POST /api/auth/login` require
 | `GET/POST/PUT/DELETE /api/contacts` | Same pattern as companies; filter by `?companyId=`; rejects a duplicate email with `409` |
 | `PATCH /api/contacts/:id/archive`, `/restore` | Same pattern as companies |
 | `GET/POST/PUT/DELETE /api/deals` | Same pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
+| `GET /api/deals/conflicts?companyId=` | Deal registration check: open (non-won/lost, non-archived) deals already on that company, with owner and last activity - the "is someone already working this account" check before registering a new deal |
 | `PATCH /api/deals/:id/archive`, `/restore` | Same pattern as companies |
-| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role. Create/edit: admin/sales, and notifies the assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
+| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role. Create/edit (including reassigning `assigneeId` on an existing task): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?status=`, `?mine=true` |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes, scoped to `?dealId=` or `?contactId=` |
 | `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total value, win rate, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
 | `GET /api/search?q=` | Case-insensitive name/title match across companies, contacts (name+email), and deals - up to 6 results each, archived records excluded |
