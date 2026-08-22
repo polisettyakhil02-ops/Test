@@ -100,6 +100,10 @@ function TeamDashboard({ data }) {
           <div className="stat-label">Win rate</div>
         </div>
         <div className="stat-tile">
+          <div className="stat-value">${data.weightedForecast.toLocaleString()}</div>
+          <div className="stat-label">Weighted forecast</div>
+        </div>
+        <div className="stat-tile">
           <div className="stat-value">{data.overdueTaskCount}</div>
           <div className="stat-label">Overdue tasks</div>
         </div>
@@ -109,7 +113,7 @@ function TeamDashboard({ data }) {
         <h2>Pipeline by stage</h2>
         <table>
           <thead>
-            <tr><th>Stage</th><th>Deals</th><th>Total value</th></tr>
+            <tr><th>Stage</th><th>Deals</th><th>Total value</th><th>Weighted value</th></tr>
           </thead>
           <tbody>
             {Object.entries(data.dealsByStage).map(([stage, v]) => (
@@ -117,6 +121,7 @@ function TeamDashboard({ data }) {
                 <td>{STAGE_LABELS[stage] || stage}</td>
                 <td>{v.count}</td>
                 <td>${v.totalValue.toLocaleString()}</td>
+                <td>${v.weightedValue.toLocaleString()}</td>
               </tr>
             ))}
           </tbody>

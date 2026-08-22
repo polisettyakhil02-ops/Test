@@ -6,6 +6,7 @@ const Activity = require('../models/Activity');
 const { STAGES } = require('../models/Deal');
 const { STATUSES } = require('../models/Task');
 const { requireAuth } = require('../middleware/auth');
+const { weightedValueForStage, weightedPipelineValue } = require('../lib/forecast');
 
 const router = express.Router();
 
@@ -41,7 +42,10 @@ async function developerDashboard(userId) {
 async function teamDashboard() {
   const [dealsByStageAgg, tasksByStatusAgg, tasksByAssigneeAgg, overdueTaskCount, recentActivities] =
     await Promise.all([
-      Deal.aggregate([{ $group: { _id: '$stage', count: { $sum: 1 }, totalValue: { $sum: '$value' } } }]),
+      Deal.aggregate([
+        { $match: { archived: { $ne: true } } },
+        { $group: { _id: '$stage', count: { $sum: 1 }, totalValue: { $sum: '$value' } } },
+      ]),
       Task.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       Task.aggregate([
         { $match: { assigneeId: { $ne: null } } },
@@ -55,6 +59,10 @@ async function teamDashboard() {
   for (const row of dealsByStageAgg) {
     dealsByStage[row._id] = { count: row.count, totalValue: row.totalValue };
   }
+  for (const stage of STAGES) {
+    dealsByStage[stage].weightedValue = weightedValueForStage(dealsByStage[stage].totalValue, stage);
+  }
+  const weightedForecast = weightedPipelineValue(dealsByStage);
 
   const won = dealsByStage.won.count;
   const lost = dealsByStage.lost.count;
@@ -67,7 +75,7 @@ async function teamDashboard() {
 
   const tasksByAssignee = tasksByAssigneeAgg.map((row) => ({ assigneeId: row._id, count: row.count }));
 
-  return { scope: 'team', dealsByStage, winRate, tasksByStatus, tasksByAssignee, overdueTaskCount, recentActivities };
+  return { scope: 'team', dealsByStage, winRate, weightedForecast, tasksByStatus, tasksByAssignee, overdueTaskCount, recentActivities };
 }
 
 router.get('/', async (req, res, next) => {

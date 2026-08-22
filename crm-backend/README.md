@@ -35,7 +35,7 @@ accounts so you can see role-based behavior:
 Change these before seeding against anything but a throwaway local database.
 
 ```bash
-npm test    # 28 unit tests: password hashing, JWT, role permissions, rate limiter, automation rule engine - no DB required
+npm test    # 36 unit tests: password hashing, JWT, role permissions, rate limiter, automation rule engine, weighted forecast - no DB required
 ```
 
 File attachments are written to `UPLOAD_DIR` (default `./uploads`, gitignored)
@@ -69,11 +69,11 @@ All routes except `/health` and `POST /api/auth/login` require
 | `PATCH /api/tasks/:id/subtasks/:subtaskId` | Toggle `done` and/or rename a subtask |
 | `DELETE /api/tasks/:id/subtasks/:subtaskId` | Remove a subtask |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes/comments, scoped to `?dealId=`, `?contactId=`, or `?taskId=`. `dealId`/`contactId` activities are admin/sales only (same restriction as the records themselves); `taskId` activities (a task's comment thread) are open to any role, same as the task |
-| `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total value, win rate, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
+| `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
 | `GET /api/search?q=` | Admin/sales only - it only searches companies/contacts/deals, all of which are already admin/sales-only. Case-insensitive name/title match, up to 6 results each, archived records excluded |
 | `GET /api/notifications` | Current user's notifications (newest first) + unread count |
 | `PATCH /api/notifications/:id/read`, `/read-all` | Mark one or all notifications read |
-| `GET/POST /api/attachments` | List (`?entityType=&entityId=`) or upload (multipart, field `file`) a file against a task, deal, or contact. Deal/contact attachments are admin/sales only; task attachments are open to any role |
+| `GET/POST /api/attachments` | List (`?entityType=&entityId=`) or upload (multipart, field `file`) a file against a task, deal, or contact. Deal/contact attachments are admin/sales only; task attachments are open to any role. Wired into the frontend's Deal and Contact detail pages as well as Task detail |
 | `GET /api/attachments/:id/download` | Streams the file |
 | `DELETE /api/attachments/:id` | The uploader, or admin/sales |
 | `GET /api/audit-log?entityType=&entityId=&limit=` | Admin only. Who did what, when - created/updated/archived/restored/deleted/stage_changed/status_changed/reassigned - across companies, contacts, deals, and tasks |
@@ -169,6 +169,21 @@ engine instead, so an admin can add, disable, or retarget behavior from
   stage change) plus one new example (auto-create a delivery kickoff task
   when a deal reaches `won`) - seeding is idempotent, skipped if any rule
   already exists.
+
+## Forecasting
+
+`src/lib/forecast.js` is pure, DB-free logic (unit tested in
+`test/forecast.test.js`) that turns raw pipeline value into a weighted
+forecast using a fixed stage-probability table (`new` 10%, `contacted` 25%,
+`qualified` 50%, `proposal` 75%, `won` 100%, `lost` 0%) - a $100k deal sitting
+in `proposal` counts for $75k of forecasted revenue, not the full $100k,
+since it hasn't closed yet. `GET /api/dashboard`'s `dealsByStage` now
+includes a `weightedValue` per stage alongside `totalValue`, and the
+top-level `weightedForecast` sums the weighted value of *open* stages only
+(`won` is excluded since that revenue is already realized; `lost` is
+excluded since its weight is 0 anyway). Archived deals are excluded from
+`dealsByStage` entirely, matching how every other deal-listing endpoint
+already treats them.
 
 ## Before exposing this to real users
 
