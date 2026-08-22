@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { TASK_STATUSES } from '../components/TaskStatusBadge';
@@ -19,6 +19,10 @@ export default function Projects() {
   const { user } = useAuth();
   const userId = user.id || user._id;
   const canAssign = user.role === 'admin' || user.role === 'sales';
+  // Cmd+K's "jump to project" links here as /projects?project=<id> - honored
+  // once, on first load, so it doesn't fight the user's own later picks.
+  const [searchParams] = useSearchParams();
+  const deepLinkedProjectId = searchParams.get('project');
 
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -42,7 +46,11 @@ export default function Projects() {
       .list()
       .then((d) => {
         setProjects(d.projects);
-        setSelectedId((current) => (current && d.projects.some((p) => p._id === current) ? current : d.projects[0]?._id || ''));
+        setSelectedId((current) => {
+          if (current && d.projects.some((p) => p._id === current)) return current;
+          if (deepLinkedProjectId && d.projects.some((p) => p._id === deepLinkedProjectId)) return deepLinkedProjectId;
+          return d.projects[0]?._id || '';
+        });
       })
       .catch((err) => setError(err.message));
   }

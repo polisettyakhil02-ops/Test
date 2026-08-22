@@ -197,14 +197,30 @@ function getFunnelRaw() {
 // velocity) are all pipeline/deal-derived, so - deliberately, not an
 // oversight - they stay out of the developer scope entirely rather than
 // leaking deal data developers can't otherwise see.
+// Same populate shape as routes/tasks.js (not exported from there - this is
+// the only other place a Task needs its project/deal/lead context inline).
+const PROJECT_CONTEXT_POPULATE = { path: 'projectId', select: 'name kind' };
+const DEAL_CONTEXT_POPULATE = { path: 'dealId', select: 'title companyId', populate: { path: 'companyId', select: 'name' } };
+const LEAD_CONTEXT_POPULATE = { path: 'leadId', select: 'name companyName' };
+
 async function developerDashboard(userId) {
-  const [tasksByStatusAgg, overdueTaskCount, tasks] = await Promise.all([
+  const [tasksByStatusAgg, overdueTaskCount, tasks, activeTask] = await Promise.all([
     Task.aggregate([
       { $match: { assigneeId: new mongoose.Types.ObjectId(userId) } },
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]),
     Task.countDocuments({ assigneeId: userId, dueDate: { $lt: new Date() }, status: { $ne: 'done' } }),
     Task.find({ assigneeId: userId }).sort({ dueDate: 1, createdAt: -1 }).limit(20),
+    // The Developer Workstation's "Active Focus" hero card: whichever
+    // in_progress task this developer touched most recently. There's no
+    // concept of "the one true active task" in the schema (a developer can
+    // have several in_progress at once) - most-recently-updated is the
+    // closest proxy for "what am I actually working on right now."
+    Task.findOne({ assigneeId: userId, status: 'in_progress' })
+      .sort({ updatedAt: -1 })
+      .populate(PROJECT_CONTEXT_POPULATE)
+      .populate(DEAL_CONTEXT_POPULATE)
+      .populate(LEAD_CONTEXT_POPULATE),
   ]);
 
   const tasksByStatus = emptyStatusCounts();
@@ -213,7 +229,7 @@ async function developerDashboard(userId) {
   }
   const openTaskCount = tasksByStatus.todo + tasksByStatus.in_progress + tasksByStatus.in_review;
 
-  return { scope: 'developer', tasksByStatus, openTaskCount, overdueTaskCount, tasks };
+  return { scope: 'developer', tasksByStatus, openTaskCount, overdueTaskCount, tasks, activeTask };
 }
 
 async function teamDashboard() {

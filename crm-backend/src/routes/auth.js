@@ -74,4 +74,18 @@ router.patch('/me/password', requireAuth, async (req, res, next) => {
   }
 });
 
+// The Developer Workstation's auto-saving Scratchpad. Whole-value replace,
+// same as PATCH /api/projects/:id/scratchpad - there's nothing structured
+// to merge, the client always has the full current text.
+router.patch('/me/scratchpad', requireAuth, async (req, res, next) => {
+  try {
+    const { scratchpad } = req.body || {};
+    const user = await User.findByIdAndUpdate(req.user.id, { scratchpad: scratchpad || '' }, { new: true });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ user });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, LabelList, ResponsiveContainer } from 'recharts';
 import { api } from '../api/client';
-import { TaskStatusBadge } from '../components/TaskStatusBadge';
+import DeveloperDashboard from './DeveloperDashboard';
 
 const STAGE_LABELS = { new: 'New', contacted: 'Contacted', qualified: 'Qualified', proposal: 'Proposal', won: 'Won', lost: 'Lost' };
-const STATUS_LABELS = { todo: 'To do', in_progress: 'In progress', in_review: 'In review', done: 'Done' };
 const CATEGORY_LABELS = { rotting_deal: 'Rotting deal', deal_no_task: 'No next step', overdue_bug: 'Overdue bug' };
 
 // Ordinal ramp for the funnel bars: one hue (the app's own blue), monotone
@@ -27,68 +26,14 @@ export default function Dashboard() {
   if (error) return <div className="error-banner">{error}</div>;
   if (!data) return <p>Loading…</p>;
 
-  return data.scope === 'developer' ? <DeveloperDashboard data={data} /> : <TeamDashboard data={data} />;
-}
+  function reload() {
+    api.dashboard().then(setData).catch((err) => setError(err.message));
+  }
 
-function DeveloperDashboard({ data }) {
-  const isOverdue = (t) => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'done';
-
-  return (
-    <div>
-      <h1>My Dashboard</h1>
-
-      <div className="stat-grid">
-        <div className="stat-tile">
-          <div className="stat-value">{data.openTaskCount}</div>
-          <div className="stat-label">Open tasks</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-value">{data.overdueTaskCount}</div>
-          <div className="stat-label">Overdue tasks</div>
-        </div>
-        <div className="stat-tile">
-          <div className="stat-value">{data.tasksByStatus.done}</div>
-          <div className="stat-label">Completed</div>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h2>My tasks by status</h2>
-        <table>
-          <thead><tr><th>Status</th><th>Count</th></tr></thead>
-          <tbody>
-            {Object.entries(data.tasksByStatus).map(([status, count]) => (
-              <tr key={status}>
-                <td>{STATUS_LABELS[status] || status}</td>
-                <td>{count}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="card">
-        <h2>My tasks</h2>
-        {data.tasks.length === 0 ? (
-          <p>Nothing assigned to you yet.</p>
-        ) : (
-          <table>
-            <thead><tr><th>Title</th><th>Status</th><th>Due</th></tr></thead>
-            <tbody>
-              {data.tasks.map((t) => (
-                <tr key={t._id}>
-                  <td>{t.title}</td>
-                  <td><TaskStatusBadge status={t.status} /></td>
-                  <td style={isOverdue(t) ? { color: 'var(--color-danger)' } : undefined}>
-                    {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+  return data.scope === 'developer' ? (
+    <DeveloperDashboard data={data} onReload={reload} />
+  ) : (
+    <TeamDashboard data={data} />
   );
 }
 

@@ -6,6 +6,7 @@ const { requireRole } = require('../middleware/requireRole');
 const { canWrite } = require('../lib/permissions');
 const { logAudit } = require('../lib/audit');
 const { emitEvent } = require('../lib/events');
+const { buildTaskCreateInput } = require('../lib/taskCreate');
 
 const router = express.Router();
 
@@ -68,44 +69,17 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
+// No requireRole gate here - admin/sales can create and assign to anyone as
+// before, and a developer can now also create a task, but only ever a
+// self-assigned one (the Developer Workstation's quick-capture bug parser
+// and Cmd+K quick-add). buildTaskCreateInput (lib/taskCreate.js) is what
+// actually enforces that boundary - see its unit tests for the exact
+// guarantees (forced self-assignment, dealId/leadId stripped).
+router.post('/', async (req, res, next) => {
   try {
-    const {
-      title,
-      description,
-      priority,
-      assigneeId,
-      dealId,
-      leadId,
-      projectId,
-      dueDate,
-      issueType,
-      severity,
-      stepsToReproduce,
-      expectedBehavior,
-      actualBehavior,
-      environment,
-      relatedTaskId,
-    } = req.body || {};
-    if (!title) return res.status(400).json({ error: 'title is required' });
-    const task = await Task.create({
-      title,
-      description,
-      priority,
-      assigneeId: assigneeId || null,
-      dealId: dealId || null,
-      leadId: leadId || null,
-      projectId: projectId || null,
-      dueDate,
-      issueType,
-      severity,
-      stepsToReproduce,
-      expectedBehavior,
-      actualBehavior,
-      environment,
-      relatedTaskId: relatedTaskId || null,
-      createdBy: req.user.id,
-    });
+    const input = buildTaskCreateInput(req.user.role, req.user.id, req.body || {});
+    if (!input.title) return res.status(400).json({ error: 'title is required' });
+    const task = await Task.create({ ...input, createdBy: req.user.id });
 
     await logAudit({ entityType: 'task', entityId: task._id, action: 'created', actorId: req.user.id });
 

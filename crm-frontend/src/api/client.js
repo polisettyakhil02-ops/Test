@@ -37,6 +37,7 @@ export const api = {
   me: () => request('/api/auth/me'),
   changePassword: (currentPassword, newPassword) =>
     request('/api/auth/me/password', { method: 'PATCH', body: { currentPassword, newPassword } }),
+  updateScratchpad: (scratchpad) => request('/api/auth/me/scratchpad', { method: 'PATCH', body: { scratchpad } }),
 
   users: {
     list: () => request('/api/users'),

@@ -58,6 +58,7 @@ message send/receive goes over a Socket.IO connection, not REST - see
 | `POST /api/auth/login` | `{ email, password }` -> `{ token, user }` |
 | `GET /api/auth/me` | Current user |
 | `PATCH /api/auth/me/password` | Self-service password change - `{ currentPassword, newPassword }` |
+| `PATCH /api/auth/me/scratchpad` | Any role. Whole-value replace of the caller's own private notes - the Developer Workstation's Scratchpad. Distinct from `Project.scratchpad` (a shared, per-project note), this one lives on `User` and only its owner ever sees it |
 | `GET/POST/PATCH /api/users` | Admin only (reads included) - manage team accounts |
 | `POST /api/leads/quick-parse` | Admin/sales. Stateless "Smart Drop Zone" - scrapes `websiteUrl` (OpenGraph tags) and/or regex-parses a name out of `linkedinUrl`, and matches a static battle card template. Doesn't touch the DB - see **Smart Drop Zone** below |
 | `GET/POST/PUT/DELETE /api/leads` | Admin/sales only (reads included). Excludes archived unless `?archived=true`; filter by `?stage=`, `?ownerId=`. `DELETE` (permanent) is admin-only |
@@ -71,7 +72,8 @@ message send/receive goes over a Socket.IO connection, not REST - see
 | `GET/POST/PUT/DELETE /api/deals` | Same access pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
 | `GET /api/deals/conflicts?companyId=` | Admin/sales only. Deal registration check: open (non-won/lost, non-archived) deals already on that company, with owner and last activity - the "is someone already working this account" check before registering a new deal |
 | `PATCH /api/deals/:id/archive`, `/restore` | Same pattern as companies |
-| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }`, `leadId` populated to `{ name, companyName }`, and `projectId` populated to `{ name, kind }`, so they can see what a task is for without needing direct access to `/api/deals`, `/api/companies`, `/api/leads`, or (for developers, moot - `/api/projects` is open to every role anyway). Create/edit (including reassigning `assigneeId` on an existing task, and setting `dealId`/`leadId`/`projectId`/bug fields): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?leadId=`, `?projectId=`, `?status=`, `?issueType=`, `?unassigned=true`, `?mine=true`. `PUT` only touches fields actually present in the request body - a partial update (e.g. the board's reassign action, which sends just `{assigneeId}`) never clobbers an omitted field to `null` |
+| `GET/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }`, `leadId` populated to `{ name, companyName }`, and `projectId` populated to `{ name, kind }`, so they can see what a task is for without needing direct access to `/api/deals`, `/api/companies`, `/api/leads`, or (for developers, moot - `/api/projects` is open to every role anyway). Edit (including reassigning `assigneeId` on an existing task, and setting `dealId`/`leadId`/`projectId`/bug fields): admin/sales only, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?leadId=`, `?projectId=`, `?status=`, `?issueType=`, `?unassigned=true`, `?mine=true`. `PUT` only touches fields actually present in the request body - a partial update (e.g. the board's reassign action, which sends just `{assigneeId}`) never clobbers an omitted field to `null` |
+| `POST /api/tasks` | Admin/sales: create and assign to anyone, same as always. Developer: **also** allowed now, but only a self-assigned "quick-capture" (the Developer Workstation's bug parser and Cmd+K quick-add) - `assigneeId` is forced to the caller and `dealId`/`leadId` are stripped regardless of what's sent. See **Developer Workstation** below and `lib/taskCreate.js`'s unit tests for the exact boundary |
 | `PATCH /api/tasks/:id/claim` | Any role. Self-assign an *unassigned* task - the one reassignment a developer can do without admin/sales, so the Developer Dashboard's cross-project Backlog is actually actionable by the people triaging it. `409` if the task already has an assignee |
 | `POST /api/tasks/:id/subtasks` | Add a checklist item - same permission as `PATCH /:id/status` (admin/sales, or the assignee) |
 | `PATCH /api/tasks/:id/subtasks/:subtaskId` | Toggle `done` and/or rename a subtask |
@@ -82,7 +84,7 @@ message send/receive goes over a Socket.IO connection, not REST - see
 | `PATCH /api/projects/:id/scratchpad` | Any role. Replaces the project's free-form notes/snippets dump - separate from the general `PUT` so a quick note doesn't need a full edit |
 | `PATCH /api/projects/:id/archive`, `/restore` | Same pattern as companies |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes/comments, scoped to `?dealId=`, `?contactId=`, `?leadId=`, or `?taskId=`. `dealId`/`contactId`/`leadId` activities are admin/sales only (same restriction as the records themselves); `taskId` activities (a task's comment thread) are open to any role, same as the task |
-| `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed, plus the "Smart Analysis" additions - `actionItems`, `stageVelocity`, `funnel` - see **Smart Analysis dashboard** below. Developer: their own tasks only - by status, overdue count, task list - no pipeline value, win rate, or any of the pipeline-derived smart-analysis data |
+| `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed, plus the "Smart Analysis" additions - `actionItems`, `stageVelocity`, `funnel` - see **Smart Analysis dashboard** below. Developer: their own tasks only - by status, overdue count, task list, plus `activeTask` (their most-recently-updated `in_progress` task, populated) for the Developer Workstation's hero card - no pipeline value, win rate, or any of the pipeline-derived smart-analysis data |
 | `GET /api/search?q=` | Admin/sales only - it only searches companies/contacts/deals, all of which are already admin/sales-only. Case-insensitive name/title match, up to 6 results each, archived records excluded |
 | `GET /api/notifications` | Current user's notifications (newest first) + unread count |
 | `PATCH /api/notifications/:id/read`, `/read-all` | Mark one or all notifications read |
@@ -112,8 +114,10 @@ the source of truth. Summary:
   itself (`dealId` populated with the deal title and company name, `leadId`
   with the lead name and company, or `projectId` with the project name and
   kind), not by browsing the client database. Full read/write on `/api/projects`
-  (it isn't client data), plus the one narrow exception to "can't reassign":
-  `PATCH /api/tasks/:id/claim` to self-assign an unassigned task.
+  (it isn't client data), plus two narrow, deliberate exceptions to "can't
+  reassign/create": `PATCH /api/tasks/:id/claim` to self-assign an unassigned
+  task, and `POST /api/tasks` to self-create one (always self-assigned,
+  never against a deal/lead) - see **Developer Workstation** below.
 
 Companies/contacts/deals aren't visible to every role by default - only
 admin and sales have any reason to see client data or deal values. Task and
@@ -154,6 +158,10 @@ worth revisiting if the team grows.
   (same soft-delete pattern as companies/contacts/deals). Unlike those,
   every route is open to any authenticated role - see **Developer
   Dashboard** below.
+- **User.scratchpad** is a private, per-account free-text field for the
+  Developer Workstation's Scratchpad - not to be confused with
+  `Project.scratchpad` above, which is shared and per-project. Defaults to
+  `''`, replaced whole-value by `PATCH /api/auth/me/scratchpad`.
 - **Company/Contact/Deal** have an `archived` flag rather than being hard-deleted
   by default - list endpoints exclude archived records unless `?archived=true`.
   Permanent `DELETE` still exists but is admin-only.
@@ -266,8 +274,9 @@ brand campaign (e.g. Finale) with its own creative brief. Every route is
 open to any authenticated role rather than admin/sales-gated like
 companies/deals, since this is the team's shared workspace, not client
 data - a developer can create a project, edit its scratchpad, and read the
-board; only task *creation* and *reassignment* (beyond self-claiming, see
-below) stay admin/sales-only, unchanged from the rest of the app.
+board; general task *reassignment* stays admin/sales-only, and general task
+*creation* stays admin/sales-only too, except for a developer's own narrow
+self-capture path - see **Developer Workstation** below.
 
 - **Scratchpad** (`Project.scratchpad`) is a single free-form text field,
   not a structured note list - explicitly for dumping code fragments or
@@ -286,6 +295,65 @@ below) stay admin/sales-only, unchanged from the rest of the app.
   deliberately narrow exception - it only ever sets `assigneeId` to the
   caller, and only while the task is still unassigned - rather than
   broadening the general reassignment permission.
+
+## Developer Workstation
+
+The developer's landing page (`/`, `crm-frontend/src/pages/DeveloperDashboard.jsx`)
+- distinct from the **Developer Dashboard** (`/projects`) above, which is the
+cross-project Kanban/Backlog view. This one is single-developer-focused: an
+"Active Focus" hero card, an auto-saving personal Scratchpad, a paste-an-error
+quick bug capture, and a `Cmd+K`/`Ctrl+K` command palette.
+
+- **`activeTask`** (see the `GET /api/dashboard` table above) is whichever
+  `in_progress` task this developer touched most recently - there's no
+  "the one true active task" concept in the schema (someone can have several
+  `in_progress` at once), so most-recently-updated is the closest available
+  proxy for "what am I actually working on."
+- **Subtask checkboxes on the hero card** are the existing
+  `PATCH /api/tasks/:id/subtasks/:subtaskId` endpoint - nothing new here, the
+  frontend just applies the toggle to its local state immediately (optimistic
+  UI) and reverts if the request fails, rather than waiting on a round trip
+  before the checkbox visibly moves.
+- **"Copy git branch"** (`feature/<last-6-of-_id>-<slugified-title>`) is
+  computed entirely client-side (`crm-frontend/src/lib/textUtils.js`) - there's
+  no server-side concept of a branch name, just a deterministic format applied
+  to data the client already has.
+- **Scratchpad** is `PATCH /api/auth/me/scratchpad` (see the endpoint table
+  above) - a whole-value replace, debounced client-side (800ms after the last
+  keystroke) rather than saving on every keystroke.
+- **Quick error/bug parser**: the frontend splits a pasted stack trace on its
+  first non-empty line for the title and keeps the full paste as the
+  description, then calls `POST /api/tasks` with `issueType: 'bug'`. This is
+  the feature that motivated relaxing that route (see below) - a developer
+  couldn't use it at all under the old admin/sales-only gate.
+- **`Cmd+K` palette**: lists projects (`GET /api/projects`, already open to
+  every role - see **Developer Dashboard** above) to jump to, plus a small
+  quick-create form that also goes through `POST /api/tasks`. The keyboard
+  listener is scoped to this page (mounted for the lifetime of the developer's
+  dashboard), not attached globally across the whole app.
+
+### Relaxing `POST /api/tasks` for developers
+
+Task creation was admin/sales-only from the very first phase of this project.
+The bug parser and quick-create above needed *some* way for a developer to
+capture work themselves, so `POST /api/tasks` now accepts any authenticated
+role - but the actual security boundary moved into a pure function,
+`buildTaskCreateInput` (`src/lib/taskCreate.js`, unit tested in
+`test/taskCreate.test.js`), rather than being expressed as a role gate on the
+route. For a developer caller specifically, regardless of what the request
+body contains:
+
+- `assigneeId` is **always** forced to the caller's own id - a developer can
+  create work for themselves, never assign it to someone else.
+- `dealId`/`leadId` are **always** stripped to `null` - a developer can't
+  read companies/contacts/deals (see **Roles & permissions** above), so they
+  shouldn't be able to point a task at one via a crafted request either, even
+  though the UI never offers that option.
+- `projectId` passes through unchanged - projects are open to every role
+  already.
+
+Everything else (title, description, priority, bug fields) passes through
+unchanged for every role, same as before.
 
 ## Smart Drop Zone (non-AI lead enrichment)
 
