@@ -36,6 +36,7 @@ router.get('/', async (req, res, next) => {
     if (req.query.dealId) filter.dealId = req.query.dealId;
     if (req.query.leadId) filter.leadId = req.query.leadId;
     if (req.query.status) filter.status = req.query.status;
+    if (req.query.type) filter.type = req.query.type;
     if (req.query.mine === 'true') filter.assigneeId = req.user.id;
     const tasks = await Task.find(filter)
       .sort({ createdAt: -1 })
@@ -59,7 +60,22 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
-    const { title, description, priority, assigneeId, dealId, leadId, dueDate } = req.body || {};
+    const {
+      title,
+      description,
+      priority,
+      assigneeId,
+      dealId,
+      leadId,
+      dueDate,
+      type,
+      severity,
+      stepsToReproduce,
+      expectedBehavior,
+      actualBehavior,
+      environment,
+      relatedTaskId,
+    } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title is required' });
     const task = await Task.create({
       title,
@@ -69,6 +85,13 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       dealId: dealId || null,
       leadId: leadId || null,
       dueDate,
+      type,
+      severity,
+      stepsToReproduce,
+      expectedBehavior,
+      actualBehavior,
+      environment,
+      relatedTaskId: relatedTaskId || null,
       createdBy: req.user.id,
     });
 
@@ -85,17 +108,42 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
   }
 });
 
+// Fields that are ObjectId refs the caller may explicitly clear by sending
+// an empty/falsy value (e.g. unassigning) - everything else is left alone
+// unless present in the body. A key simply absent from the body (e.g. the
+// board's reassign action only sends {assigneeId}) must never silently wipe
+// an unrelated field like dealId/leadId to null.
+const NULLABLE_REF_FIELDS = new Set(['assigneeId', 'dealId', 'leadId', 'relatedTaskId']);
+const UPDATABLE_TASK_FIELDS = [
+  'title',
+  'description',
+  'priority',
+  'assigneeId',
+  'dealId',
+  'leadId',
+  'dueDate',
+  'type',
+  'severity',
+  'stepsToReproduce',
+  'expectedBehavior',
+  'actualBehavior',
+  'environment',
+  'relatedTaskId',
+];
+
 router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
-    const { title, description, priority, assigneeId, dealId, leadId, dueDate } = req.body || {};
+    const body = req.body || {};
     const previous = await Task.findById(req.params.id);
     if (!previous) return res.status(404).json({ error: 'Task not found' });
 
-    const task = await Task.findByIdAndUpdate(
-      req.params.id,
-      { title, description, priority, assigneeId: assigneeId || null, dealId: dealId || null, leadId: leadId || null, dueDate },
-      { new: true, runValidators: true }
-    );
+    const update = {};
+    for (const field of UPDATABLE_TASK_FIELDS) {
+      if (body[field] === undefined) continue;
+      update[field] = NULLABLE_REF_FIELDS.has(field) ? body[field] || null : body[field];
+    }
+
+    const task = await Task.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
 
     const reassigned = task.assigneeId && String(task.assigneeId) !== String(previous.assigneeId || '');
 

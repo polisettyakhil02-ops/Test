@@ -68,7 +68,7 @@ All routes except `/health` and `POST /api/auth/login` require
 | `GET/POST/PUT/DELETE /api/deals` | Same access pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
 | `GET /api/deals/conflicts?companyId=` | Admin/sales only. Deal registration check: open (non-won/lost, non-archived) deals already on that company, with owner and last activity - the "is someone already working this account" check before registering a new deal |
 | `PATCH /api/deals/:id/archive`, `/restore` | Same pattern as companies |
-| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }` and `leadId` populated to `{ name, companyName }`, so they can see which client (or lead) a task is for without needing direct access to `/api/deals`, `/api/companies`, or `/api/leads`. Create/edit (including reassigning `assigneeId` on an existing task, and setting `dealId`/`leadId`): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?leadId=`, `?status=`, `?mine=true` |
+| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }` and `leadId` populated to `{ name, companyName }`, so they can see which client (or lead) a task is for without needing direct access to `/api/deals`, `/api/companies`, or `/api/leads`. Create/edit (including reassigning `assigneeId` on an existing task, and setting `dealId`/`leadId`/bug fields): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?leadId=`, `?status=`, `?type=`, `?mine=true`. `PUT` only touches fields actually present in the request body - a partial update (e.g. the board's reassign action, which sends just `{assigneeId}`) never clobbers an omitted field to `null` |
 | `POST /api/tasks/:id/subtasks` | Add a checklist item - same permission as `PATCH /:id/status` (admin/sales, or the assignee) |
 | `PATCH /api/tasks/:id/subtasks/:subtaskId` | Toggle `done` and/or rename a subtask |
 | `DELETE /api/tasks/:id/subtasks/:subtaskId` | Remove a subtask |
@@ -122,7 +122,10 @@ worth revisiting if the team grows.
 - **Task** has *optional* `dealId` and `leadId` fields - the "loose link" to
   developer work: a task can reference a client/deal, a pre-sales lead, or
   stand alone as internal work. Convention (not a schema constraint) is that
-  a task uses at most one of the two.
+  a task uses at most one of the two. Task also carries a `type`
+  (`'task'`|`'bug'`, default `'task'`) plus bug-only fields (`severity`,
+  `stepsToReproduce`, `expectedBehavior`, `actualBehavior`, `environment`,
+  `relatedTaskId`) - see **Bug tracking** below.
 - **Company/Contact/Deal** have an `archived` flag rather than being hard-deleted
   by default - list endpoints exclude archived records unless `?archived=true`.
   Permanent `DELETE` still exists but is admin-only.
@@ -185,6 +188,29 @@ admin can add, disable, or retarget behavior from
   stage change) plus one new example (auto-create a delivery kickoff task
   when a deal reaches `won`) - seeding is idempotent, skipped if any rule
   already exists.
+
+## Bug tracking
+
+Bugs are **not** a separate model or collection - they're a `Task` with
+`type: 'bug'` plus a handful of bug-only fields (`severity`,
+`stepsToReproduce`, `expectedBehavior`, `actualBehavior`, `environment`,
+and `relatedTaskId` for "found while working on this other task"). A true
+Mongoose discriminator (a separate `Bug` model sharing Task's collection)
+was considered and rejected: bugs and tasks share the entire lifecycle -
+status board, assignee, subtasks, attachments, comment thread, dashboard
+aggregation, and every automation event - so splitting the model would mean
+either duplicating all of that machinery or threading discriminator-aware
+code through it for no real gain at this scale. A flat optional-fields
+extension (the same pattern already used for `dealId`/`leadId`) gets the
+same practical outcome - one board, one detail page, one set of routes -
+with far less code.
+
+One free side effect: because the automation engine's rule matching
+(`src/lib/ruleEngine.js`) works against *any* field name on the triggering
+entity, an admin can already write a rule like "on `task.created`, if
+`severity` equals `critical`, notify the team lead" from the existing
+`/rules` UI - no engine change was needed to support severity-based
+automation.
 
 ## Leads & conversion
 

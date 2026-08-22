@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { TASK_STATUSES, TaskStatusBadge } from '../components/TaskStatusBadge';
+import { SeverityBadge, SEVERITIES } from '../components/SeverityBadge';
 
 const PRIORITIES = ['low', 'medium', 'high'];
 
@@ -22,7 +23,16 @@ export default function TaskDetail() {
   const [subtaskTitle, setSubtaskTitle] = useState('');
   const [uploading, setUploading] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
-  const [detailsForm, setDetailsForm] = useState({ description: '', priority: 'medium', dueDate: '' });
+  const [detailsForm, setDetailsForm] = useState({
+    description: '',
+    priority: 'medium',
+    dueDate: '',
+    severity: 'medium',
+    stepsToReproduce: '',
+    expectedBehavior: '',
+    actualBehavior: '',
+    environment: '',
+  });
 
   const canEditWork = task && (canAssign || String(task.assigneeId) === String(userId));
 
@@ -35,6 +45,11 @@ export default function TaskDetail() {
           description: d.task.description || '',
           priority: d.task.priority || 'medium',
           dueDate: d.task.dueDate ? d.task.dueDate.slice(0, 10) : '',
+          severity: d.task.severity || 'medium',
+          stepsToReproduce: d.task.stepsToReproduce || '',
+          expectedBehavior: d.task.expectedBehavior || '',
+          actualBehavior: d.task.actualBehavior || '',
+          environment: d.task.environment || '',
         });
       })
       .catch((err) => setError(err.message));
@@ -87,7 +102,7 @@ export default function TaskDetail() {
   async function saveDetails(e) {
     e.preventDefault();
     try {
-      await api.tasks.update(id, {
+      const body = {
         title: task.title,
         description: detailsForm.description,
         priority: detailsForm.priority,
@@ -95,7 +110,15 @@ export default function TaskDetail() {
         dealId: task.dealId?._id || task.dealId || null,
         leadId: task.leadId?._id || task.leadId || null,
         dueDate: detailsForm.dueDate || null,
-      });
+      };
+      if (task.type === 'bug') {
+        body.severity = detailsForm.severity;
+        body.stepsToReproduce = detailsForm.stepsToReproduce;
+        body.expectedBehavior = detailsForm.expectedBehavior;
+        body.actualBehavior = detailsForm.actualBehavior;
+        body.environment = detailsForm.environment;
+      }
+      await api.tasks.update(id, body);
       setEditingDetails(false);
       loadTask();
     } catch (err) {
@@ -184,6 +207,7 @@ export default function TaskDetail() {
       <h1>{task.title}</h1>
       <p>
         <TaskStatusBadge status={task.status} /> · {task.priority} priority
+        {task.type === 'bug' && <> · <SeverityBadge severity={task.severity} /></>}
         {task.dueDate && <> · due {new Date(task.dueDate).toLocaleDateString()}</>}
       </p>
       <p className="stat-label">{dealLabel()}</p>
@@ -254,6 +278,66 @@ export default function TaskDetail() {
           </label>
         </div>
       </div>
+
+      {task.type === 'bug' && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <h2>Bug details</h2>
+          {editingDetails ? (
+            <div className="form-grid">
+              <label>
+                Severity
+                <select value={detailsForm.severity} onChange={(e) => setDetailsForm({ ...detailsForm, severity: e.target.value })}>
+                  {SEVERITIES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Environment
+                <input
+                  placeholder="e.g. prod / Chrome 128"
+                  value={detailsForm.environment}
+                  onChange={(e) => setDetailsForm({ ...detailsForm, environment: e.target.value })}
+                />
+              </label>
+              <label>
+                Steps to reproduce
+                <textarea
+                  rows={3}
+                  value={detailsForm.stepsToReproduce}
+                  onChange={(e) => setDetailsForm({ ...detailsForm, stepsToReproduce: e.target.value })}
+                />
+              </label>
+              <label>
+                Expected behavior
+                <textarea
+                  rows={2}
+                  value={detailsForm.expectedBehavior}
+                  onChange={(e) => setDetailsForm({ ...detailsForm, expectedBehavior: e.target.value })}
+                />
+              </label>
+              <label>
+                Actual behavior
+                <textarea
+                  rows={2}
+                  value={detailsForm.actualBehavior}
+                  onChange={(e) => setDetailsForm({ ...detailsForm, actualBehavior: e.target.value })}
+                />
+              </label>
+              <p className="stat-label">Use the "Edit" button on Details above to save these together with the description.</p>
+            </div>
+          ) : (
+            <table>
+              <tbody>
+                <tr><td className="stat-label">Environment</td><td>{task.environment || '—'}</td></tr>
+                <tr><td className="stat-label">Steps to reproduce</td><td>{task.stepsToReproduce || '—'}</td></tr>
+                <tr><td className="stat-label">Expected behavior</td><td>{task.expectedBehavior || '—'}</td></tr>
+                <tr><td className="stat-label">Actual behavior</td><td>{task.actualBehavior || '—'}</td></tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h2>Subtasks</h2>

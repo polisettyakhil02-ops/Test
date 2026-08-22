@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 
 const STATUSES = ['todo', 'in_progress', 'in_review', 'done'];
 const PRIORITIES = ['low', 'medium', 'high'];
+const TYPES = ['task', 'bug'];
+const SEVERITIES = ['low', 'medium', 'high', 'critical'];
 
 const subtaskSchema = new mongoose.Schema(
   {
@@ -17,6 +19,17 @@ const taskSchema = new mongoose.Schema(
     description: { type: String, trim: true },
     status: { type: String, enum: STATUSES, default: 'todo' },
     priority: { type: String, enum: PRIORITIES, default: 'medium' },
+    // 'bug' keeps the same board/status/assignee/subtask/attachment/comment
+    // machinery as a regular task - only these extra fields are bug-specific,
+    // and only meaningful (and shown in the UI) when type === 'bug'.
+    type: { type: String, enum: TYPES, default: 'task' },
+    severity: { type: String, enum: SEVERITIES },
+    stepsToReproduce: { type: String, trim: true },
+    expectedBehavior: { type: String, trim: true },
+    actualBehavior: { type: String, trim: true },
+    environment: { type: String, trim: true },
+    // Optional - "found while working on this other task", not a formal dependency.
+    relatedTaskId: { type: mongoose.Schema.Types.ObjectId, ref: 'Task', default: null },
     assigneeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     // Optional: a task may reference a deal/client, or stand alone as
     // internal work. This is the "loose link" between dev work and the
@@ -36,3 +49,5 @@ const taskSchema = new mongoose.Schema(
 module.exports = mongoose.model('Task', taskSchema);
 module.exports.STATUSES = STATUSES;
 module.exports.PRIORITIES = PRIORITIES;
+module.exports.TYPES = TYPES;
+module.exports.SEVERITIES = SEVERITIES;

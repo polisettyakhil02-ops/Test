@@ -3,7 +3,17 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { TASK_STATUSES, TaskStatusBadge } from '../components/TaskStatusBadge';
+import { SeverityBadge, SEVERITIES } from '../components/SeverityBadge';
 import { DndBoard } from '../components/DndBoard';
+
+const emptyForm = {
+  title: '',
+  assigneeId: '',
+  type: 'task',
+  severity: 'medium',
+  environment: '',
+  stepsToReproduce: '',
+};
 
 export default function Tasks() {
   const { user } = useAuth();
@@ -11,15 +21,17 @@ export default function Tasks() {
   const [tasks, setTasks] = useState([]);
   const [developers, setDevelopers] = useState([]);
   const [mineOnly, setMineOnly] = useState(user.role === 'developer');
+  const [typeFilter, setTypeFilter] = useState('');
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({ title: '', assigneeId: '' });
+  const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
 
   function load() {
-    api.tasks.list(mineOnly ? { mine: 'true' } : {}).then((d) => setTasks(d.tasks)).catch((err) => setError(err.message));
+    const params = { ...(mineOnly ? { mine: 'true' } : {}), ...(typeFilter ? { type: typeFilter } : {}) };
+    api.tasks.list(params).then((d) => setTasks(d.tasks)).catch((err) => setError(err.message));
   }
 
-  useEffect(load, [mineOnly]);
+  useEffect(load, [mineOnly, typeFilter]);
 
   useEffect(() => {
     if (canAssign) {
@@ -31,8 +43,14 @@ export default function Tasks() {
     e.preventDefault();
     if (!form.title.trim()) return;
     try {
-      await api.tasks.create({ ...form, assigneeId: form.assigneeId || null });
-      setForm({ title: '', assigneeId: '' });
+      const body = { title: form.title, assigneeId: form.assigneeId || null, type: form.type };
+      if (form.type === 'bug') {
+        body.severity = form.severity;
+        body.environment = form.environment;
+        body.stepsToReproduce = form.stepsToReproduce;
+      }
+      await api.tasks.create(body);
+      setForm(emptyForm);
       setShowForm(false);
       load();
     } catch (err) {
@@ -73,6 +91,11 @@ export default function Tasks() {
       <div className="page-header">
         <h1>Tasks</h1>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <option value="">All work</option>
+            <option value="task">Tasks</option>
+            <option value="bug">Bugs</option>
+          </select>
           {user.role !== 'developer' && (
             <label style={{ fontSize: '0.85rem' }}>
               <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> My tasks only
@@ -94,6 +117,13 @@ export default function Tasks() {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
           </label>
           <label>
+            Type
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option value="task">Task</option>
+              <option value="bug">Bug</option>
+            </select>
+          </label>
+          <label>
             Assignee
             <select value={form.assigneeId} onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}>
               <option value="">Unassigned</option>
@@ -102,6 +132,34 @@ export default function Tasks() {
               ))}
             </select>
           </label>
+          {form.type === 'bug' && (
+            <>
+              <label>
+                Severity
+                <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>
+                  {SEVERITIES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Environment
+                <input
+                  placeholder="e.g. prod / Chrome 128"
+                  value={form.environment}
+                  onChange={(e) => setForm({ ...form, environment: e.target.value })}
+                />
+              </label>
+              <label>
+                Steps to reproduce
+                <textarea
+                  rows={3}
+                  value={form.stepsToReproduce}
+                  onChange={(e) => setForm({ ...form, stepsToReproduce: e.target.value })}
+                />
+              </label>
+            </>
+          )}
           <button type="submit" className="primary">Create</button>
         </form>
       )}
@@ -119,6 +177,9 @@ export default function Tasks() {
             <div className="board-card-title" onPointerDown={(e) => e.stopPropagation()}>
               <Link to={`/tasks/${t._id}`}>{t.title}</Link>
             </div>
+            {t.type === 'bug' && (
+              <div style={{ marginBottom: '0.35rem' }}><SeverityBadge severity={t.severity} /></div>
+            )}
             <div className="stat-label" style={{ marginBottom: '0.35rem' }}>{dealLabel(t)}</div>
             {canAssign ? (
               <select

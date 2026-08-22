@@ -415,6 +415,11 @@ tbody tr:hover {
 .badge-lead-stage-nurturing { background: #e6ecff; color: var(--color-primary-dark); }
 .badge-lead-stage-disqualified { background: #fdecea; color: var(--color-danger); }
 
+.badge-severity-low { background: #eef1f6; color: var(--color-text); }
+.badge-severity-medium { background: #fff4e0; color: #a8630c; }
+.badge-severity-high { background: #fdecea; color: var(--color-danger); }
+.badge-severity-critical { background: #fdecea; color: var(--color-danger); font-weight: 600; }
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
