@@ -91,6 +91,7 @@ message send/receive goes over a Socket.IO connection, not REST - see
 | `GET/POST /api/chat/channels` | Any role. List channels you belong to (`team` channels are implicitly everyone's); create a named `group` channel |
 | `POST /api/chat/channels/direct` | Any role. Find-or-create a DM (2 members) or group-DM (3+), keyed by the exact member set so re-requesting the same pair returns the same channel |
 | `GET /api/chat/channels/:id/messages` | Any role, membership required. Paginated history, newest-first internally but returned oldest-first; `?before=<messageId>&limit=` |
+| `GET/POST/PATCH /api/boards` | Any role. List/create/rename whiteboards; `PATCH` only touches `title`/`linkedEntityType`/`linkedEntityId` - the live canvas (`sceneData`) is written by the realtime layer's debounced save, never this route, so a REST edit can't race a canvas edit on the same document. See **Real-time chat** above for the shared realtime wiring and **Whiteboard** below for the `/board` namespace specifics |
 
 ## Roles & permissions
 
@@ -155,8 +156,12 @@ worth revisiting if the team grows.
   deal/contact/lead notes instead of being a separate system.
 - **Contact** has a `linkedinUrl` field alongside the existing `phone`.
 - **ChatChannel** (`type`: `team`/`group`/`dm`) and **ChatMessage** back
-  real-time chat - see **Real-time chat** below. `team` channels don't need
-  every user backfilled into `memberIds`; `group`/`dm` channels do.
+  real-time chat - see **Real-time chat and whiteboard** below. `team`
+  channels don't need every user backfilled into `memberIds`;
+  `group`/`dm` channels do.
+- **Board** holds a whiteboard's live canvas state (`sceneData`, a tldraw
+  snapshot) plus title/optional entity link; **BoardVersion** is a
+  periodic (not per-stroke) history snapshot - see **Whiteboard** below.
 - **Attachment** is generic (`entityType` + `entityId`) so the same model and
   routes serve tasks, deals, and contacts.
 - **AuditLog** is a flat, append-only record of who did what and when
@@ -258,16 +263,18 @@ everything before the real `POST /api/leads` (which now also accepts
 `enrichment`/`battleCard` in its body) actually creates anything. Re-running
 a parse costs nothing and leaves no partial records behind.
 
-## Real-time chat
+## Real-time chat and whiteboard
 
 `src/realtime/index.js` attaches Socket.IO to the **same HTTP server**
 Express listens on (`src/index.js`) - no second port or process to deploy.
-The bottleneck risk with adding realtime to an existing API isn't "two
-servers competing," it's a socket handler doing synchronous CPU work on the
-single event loop and stalling every other request, REST or WebSocket,
-until it finishes. The mitigation here is entirely about what's *inside*
-each handler: every one does only awaited async I/O (a Mongo call), never a
-synchronous loop over a large payload.
+It exposes two namespaces, `/chat` (below) and `/board` (see **Whiteboard**
+further down), sharing one JWT handshake auth middleware. The bottleneck
+risk with adding realtime to an existing API isn't "two servers competing,"
+it's a socket handler doing synchronous CPU work on the single event loop
+and stalling every other request, REST or WebSocket, until it finishes. The
+mitigation here is entirely about what's *inside* each handler: every one
+does only awaited async I/O (a Mongo call), never a synchronous loop over a
+large payload.
 
 - **Auth**: the `/chat` namespace's connection middleware verifies the JWT
   passed in the Socket.IO handshake (`socket.handshake.auth.token`) using
@@ -291,6 +298,43 @@ No new datastore was added for this - MongoDB handles chat history fine at
 this team's scale. If this ever needs more than one server instance,
 Socket.IO's rooms need a shared adapter (e.g. Redis) to broadcast across
 processes - not needed now, worth remembering if that changes.
+
+## Whiteboard
+
+A shared canvas (`Board` + periodic `BoardVersion` safety-net snapshots) for
+live drawing, meeting notes, architecture sketches, or creative
+briefs/storyboards - the frontend embeds `tldraw`. Any authenticated team
+member can join and edit any board (boards aren't access-controlled beyond
+authentication, same as chat's `team` channel - this is an internal tool,
+not a client-facing one).
+
+- **`board:join`** - joins the Socket.IO room for that board (`board:<id>`);
+  no membership check, any authenticated user.
+- **`scene:update`** - the client emits its current canvas snapshot
+  (throttled client-side, ~400ms) whenever the user draws something. The
+  server relays it to every *other* client in the room (the sender never
+  gets its own update echoed back), and separately schedules a **debounced
+  persist**: 3 seconds after the last update for that board, the current
+  scene is written to `Board.sceneData`. A `BoardVersion` snapshot is only
+  captured if more than 5 minutes have passed since the last one for that
+  board - a safety net, not a full undo history, and never on every stroke.
+- This is a **simple relay-and-last-write-wins sync, not a CRDT merge** -
+  the honest trade-off of building this on the same lightweight pattern
+  chat uses instead of adopting tldraw's own dedicated multiplayer sync
+  package. Fine for a small team where two people rarely draw the exact
+  same spot at the exact same moment; if genuine fine-grained concurrent
+  editing conflict resolution becomes a real problem, that's the point to
+  evaluate `@tldraw/sync` instead of this hand-rolled relay.
+- The debounce/snapshot-interval state (`boardSaveTimers`,
+  `boardLastSnapshotAt` in `src/realtime/index.js`) is in-process memory -
+  fine at this team's scale, same caveat as Socket.IO's own room broadcast
+  needing a shared adapter (e.g. Redis) if this ever runs on more than one
+  server instance.
+- tldraw fetches its default fonts/icons/translations from
+  `cdn.tldraw.com` at runtime. A normal internet-connected deployment never
+  notices; a fully offline/intranet deployment would need to self-host
+  those static assets and pass `assetUrls` to the `<Tldraw>` component -
+  not done here, since it's not needed for a normal deployment.
 
 ## Leads & conversion
 

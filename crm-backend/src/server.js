@@ -16,6 +16,7 @@ const attachmentRoutes = require('./routes/attachments');
 const auditLogRoutes = require('./routes/auditLog');
 const ruleRoutes = require('./routes/rules');
 const chatRoutes = require('./routes/chat');
+const boardRoutes = require('./routes/boards');
 const { errorHandler } = require('./middleware/errorHandler');
 
 function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
@@ -45,6 +46,7 @@ function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
   app.use('/api/audit-log', auditLogRoutes);
   app.use('/api/rules', ruleRoutes);
   app.use('/api/chat', chatRoutes);
+  app.use('/api/boards', boardRoutes);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use(errorHandler);

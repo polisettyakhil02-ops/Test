@@ -36,6 +36,7 @@ npm run preview  # serve the production build locally
 | `/users` | Admin only | Create team accounts, activate/deactivate |
 | `/rules` | Admin only | **Automation.** Create/edit/delete rules that fire on a CRM event (deal created/stage changed, task created/assigned/status changed) with an optional single field-match condition, and either send a notification or create a task - templated with `{{field}}` placeholders. Enable/disable any rule with a checkbox without deleting it |
 | `/chat` | Any role | **Real-time chat.** A channel list (the shared #General team channel plus any DMs/groups you're in) and a live thread. Messages send/receive over a Socket.IO connection (`src/lib/socket.js`), not a page reload or polling - a message sent by anyone in the channel appears instantly for everyone else in it. "New DM" picks a teammate from a minimal name-only directory (`GET /api/chat/directory` - `/api/users` is admin-only) and finds-or-creates the DM channel |
+| `/boards`, `/boards/:id` | Any role | **Whiteboard.** A list of shared canvases and a live collaborative drawing surface (embeds [tldraw](https://tldraw.dev)) - for architecture sketches, meeting notes, or creative briefs/storyboards. Every edit anyone makes on a board appears live for everyone else viewing it, over the same kind of Socket.IO connection chat uses (a separate `/board` namespace, `src/lib/socket.js`). The canvas code (`pages/BoardDetail.jsx`, tldraw itself) is lazy-loaded (`React.lazy`) so its ~1.7MB doesn't load until someone actually opens a board |
 | `/profile` | Any role | Change your own password |
 
 A developer's nav doesn't show Leads, Pipeline, Companies, or Contacts at all - not
@@ -62,9 +63,10 @@ every API call (`src/api/client.js`). There's no token refresh - sessions
 last as long as the backend's `JWT_EXPIRES_IN`, after which the user is
 redirected to `/login` on the next failed request.
 
-The chat Socket.IO connection (`src/lib/socket.js`) reuses the same stored
-token, passed in the connection handshake rather than a header (`auth:
-{token}`) - Socket.IO's client/server handshake doesn't carry arbitrary
-HTTP headers the way `fetch` does. One shared connection per tab, created
-lazily on first use; `AuthContext`'s `logout()` disconnects it so a stale
-authenticated socket doesn't linger past logout.
+The chat and whiteboard Socket.IO connections (`src/lib/socket.js`) reuse
+the same stored token, passed in the connection handshake rather than a
+header (`auth: {token}`) - Socket.IO's client/server handshake doesn't
+carry arbitrary HTTP headers the way `fetch` does. One shared connection
+per tab per namespace, created lazily on first use; `AuthContext`'s
+`logout()` disconnects both so a stale authenticated socket doesn't linger
+past logout.

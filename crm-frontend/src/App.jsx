@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -15,9 +16,14 @@ import RegisterDeal from './pages/RegisterDeal';
 import Tasks from './pages/Tasks';
 import TaskDetail from './pages/TaskDetail';
 import Chat from './pages/Chat';
+import Boards from './pages/Boards';
 import Users from './pages/Users';
 import Rules from './pages/Rules';
 import Profile from './pages/Profile';
+
+// tldraw is a large library (~2MB) - code-split so it only loads for
+// someone who actually opens a board, not on every page load.
+const BoardDetail = lazy(() => import('./pages/BoardDetail'));
 
 // Companies, contacts, and the pipeline are client/deal data - admin/sales
 // only, matching the backend (routes/companies.js, routes/contacts.js,
@@ -113,6 +119,15 @@ export default function App() {
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
         <Route path="/chat" element={<Chat />} />
+        <Route path="/boards" element={<Boards />} />
+        <Route
+          path="/boards/:id"
+          element={
+            <Suspense fallback={<p>Loading board…</p>}>
+              <BoardDetail />
+            </Suspense>
+          }
+        />
         <Route path="/profile" element={<Profile />} />
         <Route
           path="/users"

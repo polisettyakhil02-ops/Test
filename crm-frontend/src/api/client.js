@@ -178,6 +178,13 @@ export const api = {
     },
   },
 
+  boards: {
+    list: () => request('/api/boards'),
+    get: (id) => request(`/api/boards/${id}`),
+    create: (body) => request('/api/boards', { method: 'POST', body }),
+    update: (id, body) => request(`/api/boards/${id}`, { method: 'PATCH', body }),
+  },
+
   dashboard: () => request('/api/dashboard'),
 
   search: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),

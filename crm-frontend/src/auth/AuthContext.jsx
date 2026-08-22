@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken } from '../api/client';
-import { disconnectChatSocket } from '../lib/socket';
+import { disconnectChatSocket, disconnectBoardSocket } from '../lib/socket';
 
 const AuthContext = createContext(null);
 
@@ -30,6 +30,7 @@ export function AuthProvider({ children }) {
     setToken(null);
     setUser(null);
     disconnectChatSocket();
+    disconnectBoardSocket();
   }
 
   return (
