@@ -9,11 +9,13 @@ import { DndBoard } from '../components/DndBoard';
 const emptyForm = {
   title: '',
   assigneeId: '',
-  type: 'task',
+  issueType: 'feature',
   severity: 'medium',
   environment: '',
   stepsToReproduce: '',
 };
+
+const ISSUE_TYPE_LABELS = { feature: 'Feature', bug: 'Bug', tech_debt: 'Tech debt' };
 
 export default function Tasks() {
   const { user } = useAuth();
@@ -27,7 +29,7 @@ export default function Tasks() {
   const [showForm, setShowForm] = useState(false);
 
   function load() {
-    const params = { ...(mineOnly ? { mine: 'true' } : {}), ...(typeFilter ? { type: typeFilter } : {}) };
+    const params = { ...(mineOnly ? { mine: 'true' } : {}), ...(typeFilter ? { issueType: typeFilter } : {}) };
     api.tasks.list(params).then((d) => setTasks(d.tasks)).catch((err) => setError(err.message));
   }
 
@@ -43,8 +45,8 @@ export default function Tasks() {
     e.preventDefault();
     if (!form.title.trim()) return;
     try {
-      const body = { title: form.title, assigneeId: form.assigneeId || null, type: form.type };
-      if (form.type === 'bug') {
+      const body = { title: form.title, assigneeId: form.assigneeId || null, issueType: form.issueType };
+      if (form.issueType === 'bug') {
         body.severity = form.severity;
         body.environment = form.environment;
         body.stepsToReproduce = form.stepsToReproduce;
@@ -80,6 +82,7 @@ export default function Tasks() {
   const canEditStatus = (t) => user.role === 'admin' || user.role === 'sales' || String(t.assigneeId) === String(user.id || user._id);
   const dealLabel = (t) => {
     if (t.leadId) return `Lead: ${t.leadId.name}`;
+    if (t.projectId) return `Project: ${t.projectId.name}`;
     if (!t.dealId) return 'Internal — no client';
     const company = t.dealId.companyId?.name;
     if (!company || t.dealId.title.toLowerCase().startsWith(company.toLowerCase())) return t.dealId.title;
@@ -93,8 +96,9 @@ export default function Tasks() {
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
             <option value="">All work</option>
-            <option value="task">Tasks</option>
+            <option value="feature">Features</option>
             <option value="bug">Bugs</option>
+            <option value="tech_debt">Tech debt</option>
           </select>
           {user.role !== 'developer' && (
             <label style={{ fontSize: '0.85rem' }}>
@@ -118,9 +122,10 @@ export default function Tasks() {
           </label>
           <label>
             Type
-            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-              <option value="task">Task</option>
+            <select value={form.issueType} onChange={(e) => setForm({ ...form, issueType: e.target.value })}>
+              <option value="feature">Feature</option>
               <option value="bug">Bug</option>
+              <option value="tech_debt">Tech debt</option>
             </select>
           </label>
           <label>
@@ -132,7 +137,7 @@ export default function Tasks() {
               ))}
             </select>
           </label>
-          {form.type === 'bug' && (
+          {form.issueType === 'bug' && (
             <>
               <label>
                 Severity
@@ -177,9 +182,11 @@ export default function Tasks() {
             <div className="board-card-title" onPointerDown={(e) => e.stopPropagation()}>
               <Link to={`/tasks/${t._id}`}>{t.title}</Link>
             </div>
-            {t.type === 'bug' && (
+            {t.issueType === 'bug' ? (
               <div style={{ marginBottom: '0.35rem' }}><SeverityBadge severity={t.severity} /></div>
-            )}
+            ) : t.issueType === 'tech_debt' ? (
+              <div className="stat-label" style={{ marginBottom: '0.35rem' }}>{ISSUE_TYPE_LABELS.tech_debt}</div>
+            ) : null}
             <div className="stat-label" style={{ marginBottom: '0.35rem' }}>{dealLabel(t)}</div>
             {canAssign ? (
               <select

@@ -7,6 +7,7 @@ const companyRoutes = require('./routes/companies');
 const contactRoutes = require('./routes/contacts');
 const dealRoutes = require('./routes/deals');
 const leadRoutes = require('./routes/leads');
+const projectRoutes = require('./routes/projects');
 const taskRoutes = require('./routes/tasks');
 const activityRoutes = require('./routes/activities');
 const dashboardRoutes = require('./routes/dashboard');
@@ -37,6 +38,7 @@ function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
   app.use('/api/contacts', contactRoutes);
   app.use('/api/deals', dealRoutes);
   app.use('/api/leads', leadRoutes);
+  app.use('/api/projects', projectRoutes);
   app.use('/api/tasks', taskRoutes);
   app.use('/api/activities', activityRoutes);
   app.use('/api/dashboard', dashboardRoutes);

@@ -11,6 +11,7 @@ const Deal = require('../models/Deal');
 const Task = require('../models/Task');
 const Rule = require('../models/Rule');
 const Lead = require('../models/Lead');
+const Project = require('../models/Project');
 const ChatChannel = require('../models/ChatChannel');
 const { hashPassword } = require('../lib/password');
 
@@ -75,6 +76,55 @@ async function main() {
     console.log('Created sample company, contact, deal and task.');
   } else {
     console.log('Sample data already present, skipping.');
+  }
+
+  const existingProject = await Project.findOne();
+  let internalProject;
+  let finaleProject;
+  if (!existingProject) {
+    internalProject = await Project.create({
+      name: 'Internal Tooling',
+      description: 'CRM platform work that isn\'t tied to a specific client deal.',
+      kind: 'internal',
+      scratchpad: '// Ideas / reminders\n- Look into batching the notification poll instead of per-tab 30s intervals\n- TODO: revisit Mongo indexes on Task once we have real usage volume',
+      createdBy: admin._id,
+    });
+    finaleProject = await Project.create({
+      name: 'Finale Launch',
+      description: 'Brand campaign - launch storyboards, creative briefs and the microsite build.',
+      kind: 'campaign',
+      scratchpad: '// Palette from the brief\nconst finalePalette = ["#101820", "#F2AA4C", "#F8F4E3"];\n\nMicrosite hero copy draft:\n"Finale. Out now."',
+      createdBy: sales._id,
+    });
+
+    await Task.create([
+      {
+        title: 'Build Finale microsite hero section',
+        description: 'Implement the hero from the creative brief - see the Finale Launch scratchpad for palette/copy.',
+        priority: 'high',
+        issueType: 'feature',
+        assigneeId: developer._id,
+        projectId: finaleProject._id,
+        createdBy: sales._id,
+      },
+      {
+        title: 'Notification poll causes visible jank on low-end devices',
+        description: 'The 30s notification poll appears to block the main thread briefly on older hardware.',
+        priority: 'medium',
+        issueType: 'bug',
+        severity: 'medium',
+        environment: 'Chrome 120, Android (low-end)',
+        stepsToReproduce: '1. Open the CRM on a low-end Android device\n2. Wait for the notification poll to fire\n3. Observe a brief scroll stutter',
+        projectId: internalProject._id,
+        // Deliberately unassigned - this is what the Developer Dashboard's
+        // Backlog view (unassigned bugs) is for.
+        createdBy: admin._id,
+      },
+    ]);
+
+    console.log('Created sample projects (Internal Tooling, Finale Launch) and project-linked tasks.');
+  } else {
+    console.log('Sample projects already present, skipping.');
   }
 
   const existingLead = await Lead.findOne();

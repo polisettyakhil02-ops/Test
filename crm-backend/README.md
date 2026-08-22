@@ -71,12 +71,16 @@ message send/receive goes over a Socket.IO connection, not REST - see
 | `GET/POST/PUT/DELETE /api/deals` | Same access pattern as companies; filter by `?stage=`, `?ownerId=`, `?companyId=`. `PATCH /:id/stage` moves the pipeline stage, logs an activity (optionally with a `reason` when moving to `lost`), and notifies the deal owner if someone else moved it |
 | `GET /api/deals/conflicts?companyId=` | Admin/sales only. Deal registration check: open (non-won/lost, non-archived) deals already on that company, with owner and last activity - the "is someone already working this account" check before registering a new deal |
 | `PATCH /api/deals/:id/archive`, `/restore` | Same pattern as companies |
-| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }` and `leadId` populated to `{ name, companyName }`, so they can see which client (or lead) a task is for without needing direct access to `/api/deals`, `/api/companies`, or `/api/leads`. Create/edit (including reassigning `assigneeId` on an existing task, and setting `dealId`/`leadId`/bug fields): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?leadId=`, `?status=`, `?type=`, `?mine=true`. `PUT` only touches fields actually present in the request body - a partial update (e.g. the board's reassign action, which sends just `{assigneeId}`) never clobbers an omitted field to `null` |
+| `GET/POST/PUT/DELETE /api/tasks` | Reads: any role - a developer's own tasks come back with `dealId` populated to `{ title, companyId: { name } }`, `leadId` populated to `{ name, companyName }`, and `projectId` populated to `{ name, kind }`, so they can see what a task is for without needing direct access to `/api/deals`, `/api/companies`, `/api/leads`, or (for developers, moot - `/api/projects` is open to every role anyway). Create/edit (including reassigning `assigneeId` on an existing task, and setting `dealId`/`leadId`/`projectId`/bug fields): admin/sales, and notifies the (re)assignee. `PATCH /:id/status` also allowed by the assigned developer. Filter by `?assigneeId=`, `?dealId=`, `?leadId=`, `?projectId=`, `?status=`, `?issueType=`, `?unassigned=true`, `?mine=true`. `PUT` only touches fields actually present in the request body - a partial update (e.g. the board's reassign action, which sends just `{assigneeId}`) never clobbers an omitted field to `null` |
+| `PATCH /api/tasks/:id/claim` | Any role. Self-assign an *unassigned* task - the one reassignment a developer can do without admin/sales, so the Developer Dashboard's cross-project Backlog is actually actionable by the people triaging it. `409` if the task already has an assignee |
 | `POST /api/tasks/:id/subtasks` | Add a checklist item - same permission as `PATCH /:id/status` (admin/sales, or the assignee) |
 | `PATCH /api/tasks/:id/subtasks/:subtaskId` | Toggle `done` and/or rename a subtask |
 | `DELETE /api/tasks/:id/subtasks/:subtaskId` | Remove a subtask |
 | `POST /api/tasks/:id/snippets` | Add a code snippet (`label`, `language`, `code`) - same permission as subtasks |
 | `DELETE /api/tasks/:id/snippets/:snippetId` | Remove a code snippet |
+| `GET/POST/PUT /api/projects` | Any role (reads included) - projects are the shared dev/creative workspace, not client data. Excludes archived unless `?archived=true` |
+| `PATCH /api/projects/:id/scratchpad` | Any role. Replaces the project's free-form notes/snippets dump - separate from the general `PUT` so a quick note doesn't need a full edit |
+| `PATCH /api/projects/:id/archive`, `/restore` | Same pattern as companies |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes/comments, scoped to `?dealId=`, `?contactId=`, `?leadId=`, or `?taskId=`. `dealId`/`contactId`/`leadId` activities are admin/sales only (same restriction as the records themselves); `taskId` activities (a task's comment thread) are open to any role, same as the task |
 | `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
 | `GET /api/search?q=` | Admin/sales only - it only searches companies/contacts/deals, all of which are already admin/sales-only. Case-insensitive name/title match, up to 6 results each, archived records excluded |
@@ -104,10 +108,12 @@ the source of truth. Summary:
   the user directory (`GET` included - this is enforced on the backend, not
   just hidden in the UI). Can only update the status of tasks assigned to
   them (and subtasks/attachments on them), and comment on any task's thread.
-  Sees which client or lead a task belongs to through the task itself
-  (`dealId` populated with the deal title and company name, or `leadId`
-  populated with the lead name and company), not by browsing the client
-  database.
+  Sees which client, lead, or project a task belongs to through the task
+  itself (`dealId` populated with the deal title and company name, `leadId`
+  with the lead name and company, or `projectId` with the project name and
+  kind), not by browsing the client database. Full read/write on `/api/projects`
+  (it isn't client data), plus the one narrow exception to "can't reassign":
+  `PATCH /api/tasks/:id/claim` to self-assign an unassigned task.
 
 Companies/contacts/deals aren't visible to every role by default - only
 admin and sales have any reason to see client data or deal values. Task and
@@ -130,13 +136,24 @@ worth revisiting if the team grows.
   created directly, bypassing the lead stage entirely) - `stage` starts at
   `new` and moves through `contacted` -> `qualified` -> `proposal` ->
   `won`/`lost`.
-- **Task** has *optional* `dealId` and `leadId` fields - the "loose link" to
-  developer work: a task can reference a client/deal, a pre-sales lead, or
-  stand alone as internal work. Convention (not a schema constraint) is that
-  a task uses at most one of the two. Task also carries a `type`
-  (`'task'`|`'bug'`, default `'task'`) plus bug-only fields (`severity`,
-  `stepsToReproduce`, `expectedBehavior`, `actualBehavior`, `environment`,
-  `relatedTaskId`) - see **Bug tracking** below.
+- **Task** has *optional* `dealId`, `leadId`, and `projectId` fields - the
+  "loose link" to developer work: a task can reference a client/deal, a
+  pre-sales lead, a project (internal build or brand campaign), or stand
+  alone as ad-hoc work. Convention (not a schema constraint) is that a task
+  uses at most one of the three. Task also carries an `issueType`
+  (`'feature'`|`'bug'`|`'tech_debt'`, default `'feature'` - renamed from a
+  plain `type: 'task'|'bug'` once tasks needed to live on a Project board
+  alongside tech-debt work, not just features and bugs) plus bug-only
+  fields (`severity`, `stepsToReproduce`, `expectedBehavior`,
+  `actualBehavior`, `environment`, `relatedTaskId`) - see **Bug tracking**
+  below.
+- **Project** is the developer/creative workspace object - `name`,
+  `description`, `kind` (`'internal'`|`'campaign'`, e.g. an internal build
+  vs. a brand campaign like Finale), a free-form `scratchpad` string for
+  notes/snippets that don't belong to any one task yet, and `archived`
+  (same soft-delete pattern as companies/contacts/deals). Unlike those,
+  every route is open to any authenticated role - see **Developer
+  Dashboard** below.
 - **Company/Contact/Deal** have an `archived` flag rather than being hard-deleted
   by default - list endpoints exclude archived records unless `?archived=true`.
   Permanent `DELETE` still exists but is admin-only.
@@ -167,9 +184,10 @@ worth revisiting if the team grows.
 - **AuditLog** is a flat, append-only record of who did what and when
   (`action` + a small `changes` diff, not a full before/after snapshot) -
   wired into create/update/archive/restore/delete on companies, contacts,
-  deals, and leads (plus `stage_changed`/`converted` on leads), create/update
-  /reassign/status-change/delete on tasks, and create/update/enable/disable
-  /delete on automation rules. Viewable at `GET /api/audit-log` (admin only).
+  deals, leads (plus `stage_changed`/`converted` on leads), and projects,
+  create/update/reassign/status-change/delete on tasks, and
+  create/update/enable/disable/delete on automation rules. Viewable at
+  `GET /api/audit-log` (admin only).
 - **Rule** defines an automation: a `trigger` (an event name plus an
   optional list of `{ field, op, value }` conditions, all of which must
   match) and one or more `actions` (`notify` or `create_task`, each with a
@@ -214,7 +232,7 @@ admin can add, disable, or retarget behavior from
 ## Bug tracking
 
 Bugs are **not** a separate model or collection - they're a `Task` with
-`type: 'bug'` plus a handful of bug-only fields (`severity`,
+`issueType: 'bug'` plus a handful of bug-only fields (`severity`,
 `stepsToReproduce`, `expectedBehavior`, `actualBehavior`, `environment`,
 and `relatedTaskId` for "found while working on this other task"). A true
 Mongoose discriminator (a separate `Bug` model sharing Task's collection)
@@ -223,9 +241,15 @@ status board, assignee, subtasks, attachments, comment thread, dashboard
 aggregation, and every automation event - so splitting the model would mean
 either duplicating all of that machinery or threading discriminator-aware
 code through it for no real gain at this scale. A flat optional-fields
-extension (the same pattern already used for `dealId`/`leadId`) gets the
-same practical outcome - one board, one detail page, one set of routes -
-with far less code.
+extension (the same pattern already used for `dealId`/`leadId`/`projectId`)
+gets the same practical outcome - one board, one detail page, one set of
+routes - with far less code.
+
+`issueType` started as a plain `type: 'task'|'bug'` boolean-ish flag; it
+widened to `'feature'|'bug'|'tech_debt'` once tasks needed to live on a
+Project's Kanban board next to tech-debt work that isn't really "just a
+task" either. There's deliberately no separate `tech_debt`-only field set -
+it reuses the same lifecycle as a feature, no bug-specific fields shown.
 
 One free side effect: because the automation engine's rule matching
 (`src/lib/ruleEngine.js`) works against *any* field name on the triggering
@@ -233,6 +257,35 @@ entity, an admin can already write a rule like "on `task.created`, if
 `severity` equals `critical`, notify the team lead" from the existing
 `/rules` UI - no engine change was needed to support severity-based
 automation.
+
+## Developer Dashboard
+
+`Project` is the "Developer Creative Space" - a lightweight grouping object
+for work that isn't tied to a client deal: internal builds/tooling, or a
+brand campaign (e.g. Finale) with its own creative brief. Every route is
+open to any authenticated role rather than admin/sales-gated like
+companies/deals, since this is the team's shared workspace, not client
+data - a developer can create a project, edit its scratchpad, and read the
+board; only task *creation* and *reassignment* (beyond self-claiming, see
+below) stay admin/sales-only, unchanged from the rest of the app.
+
+- **Scratchpad** (`Project.scratchpad`) is a single free-form text field,
+  not a structured note list - explicitly for dumping code fragments or
+  half-formed ideas before they're worth turning into a task, same spirit
+  as `Task.codeSnippets` but at the project level and without the
+  label/language structure (there's nowhere to hang that metadata for a
+  loose scratchpad, and forcing it would just get in the way).
+- **Backlog** is *not* scoped to the selected project - `GET
+  /api/tasks?issueType=bug&unassigned=true` returns unassigned bugs across
+  every project, because triage happens before ownership, not per-project.
+  The Kanban board below it *is* project-scoped (`?projectId=`), since
+  that's "what am I actively working on."
+- **Claiming**: a developer can't reassign tasks in general (`PUT
+  /api/tasks/:id` stays admin/sales-only), but the Backlog is useless to
+  them if they can't act on it. `PATCH /api/tasks/:id/claim` is a
+  deliberately narrow exception - it only ever sets `assigneeId` to the
+  caller, and only while the task is still unassigned - rather than
+  broadening the general reassignment permission.
 
 ## Smart Drop Zone (non-AI lead enrichment)
 

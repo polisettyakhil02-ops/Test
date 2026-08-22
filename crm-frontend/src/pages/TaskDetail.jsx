@@ -76,6 +76,7 @@ export default function TaskDetail() {
 
   const dealLabel = () => {
     if (task.leadId) return `Lead: ${task.leadId.name}`;
+    if (task.projectId) return `Project: ${task.projectId.name}`;
     if (!task.dealId) return 'Internal — no client';
     const company = task.dealId.companyId?.name;
     if (!company || task.dealId.title.toLowerCase().startsWith(company.toLowerCase())) return task.dealId.title;
@@ -110,9 +111,10 @@ export default function TaskDetail() {
         assigneeId: task.assigneeId,
         dealId: task.dealId?._id || task.dealId || null,
         leadId: task.leadId?._id || task.leadId || null,
+        projectId: task.projectId?._id || task.projectId || null,
         dueDate: detailsForm.dueDate || null,
       };
-      if (task.type === 'bug') {
+      if (task.issueType === 'bug') {
         body.severity = detailsForm.severity;
         body.stepsToReproduce = detailsForm.stepsToReproduce;
         body.expectedBehavior = detailsForm.expectedBehavior;
@@ -229,7 +231,8 @@ export default function TaskDetail() {
       <h1>{task.title}</h1>
       <p>
         <TaskStatusBadge status={task.status} /> · {task.priority} priority
-        {task.type === 'bug' && <> · <SeverityBadge severity={task.severity} /></>}
+        {task.issueType === 'bug' && <> · <SeverityBadge severity={task.severity} /></>}
+        {task.issueType === 'tech_debt' && <> · <span className="stat-label">Tech debt</span></>}
         {task.dueDate && <> · due {new Date(task.dueDate).toLocaleDateString()}</>}
       </p>
       <p className="stat-label">{dealLabel()}</p>
@@ -301,7 +304,7 @@ export default function TaskDetail() {
         </div>
       </div>
 
-      {task.type === 'bug' && (
+      {task.issueType === 'bug' && (
         <div className="card" style={{ marginBottom: '1.5rem' }}>
           <h2>Bug details</h2>
           {editingDetails ? (

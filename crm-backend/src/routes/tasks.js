@@ -16,6 +16,10 @@ const router = express.Router();
 const DEAL_CONTEXT_POPULATE = { path: 'dealId', select: 'title companyId', populate: { path: 'companyId', select: 'name' } };
 // Same reasoning for leads (routes/leads.js is admin/sales only too).
 const LEAD_CONTEXT_POPULATE = { path: 'leadId', select: 'name companyName' };
+// Projects are open to every role (see routes/projects.js), so this is just
+// for convenience - a board card shouldn't need a second request to show
+// which project a task belongs to.
+const PROJECT_CONTEXT_POPULATE = { path: 'projectId', select: 'name kind' };
 
 // Same rule as status updates: admin/sales always, or the assignee working
 // their own task.
@@ -35,13 +39,16 @@ router.get('/', async (req, res, next) => {
     if (req.query.assigneeId) filter.assigneeId = req.query.assigneeId;
     if (req.query.dealId) filter.dealId = req.query.dealId;
     if (req.query.leadId) filter.leadId = req.query.leadId;
+    if (req.query.projectId) filter.projectId = req.query.projectId;
     if (req.query.status) filter.status = req.query.status;
-    if (req.query.type) filter.type = req.query.type;
+    if (req.query.issueType) filter.issueType = req.query.issueType;
+    if (req.query.unassigned === 'true') filter.assigneeId = null;
     if (req.query.mine === 'true') filter.assigneeId = req.user.id;
     const tasks = await Task.find(filter)
       .sort({ createdAt: -1 })
       .populate(DEAL_CONTEXT_POPULATE)
-      .populate(LEAD_CONTEXT_POPULATE);
+      .populate(LEAD_CONTEXT_POPULATE)
+      .populate(PROJECT_CONTEXT_POPULATE);
     res.json({ tasks });
   } catch (err) {
     next(err);
@@ -50,7 +57,10 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const task = await Task.findById(req.params.id).populate(DEAL_CONTEXT_POPULATE).populate(LEAD_CONTEXT_POPULATE);
+    const task = await Task.findById(req.params.id)
+      .populate(DEAL_CONTEXT_POPULATE)
+      .populate(LEAD_CONTEXT_POPULATE)
+      .populate(PROJECT_CONTEXT_POPULATE);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.json({ task });
   } catch (err) {
@@ -67,8 +77,9 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       assigneeId,
       dealId,
       leadId,
+      projectId,
       dueDate,
-      type,
+      issueType,
       severity,
       stepsToReproduce,
       expectedBehavior,
@@ -84,8 +95,9 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       assigneeId: assigneeId || null,
       dealId: dealId || null,
       leadId: leadId || null,
+      projectId: projectId || null,
       dueDate,
-      type,
+      issueType,
       severity,
       stepsToReproduce,
       expectedBehavior,
@@ -113,7 +125,7 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
 // unless present in the body. A key simply absent from the body (e.g. the
 // board's reassign action only sends {assigneeId}) must never silently wipe
 // an unrelated field like dealId/leadId to null.
-const NULLABLE_REF_FIELDS = new Set(['assigneeId', 'dealId', 'leadId', 'relatedTaskId']);
+const NULLABLE_REF_FIELDS = new Set(['assigneeId', 'dealId', 'leadId', 'projectId', 'relatedTaskId']);
 const UPDATABLE_TASK_FIELDS = [
   'title',
   'description',
@@ -121,8 +133,9 @@ const UPDATABLE_TASK_FIELDS = [
   'assigneeId',
   'dealId',
   'leadId',
+  'projectId',
   'dueDate',
-  'type',
+  'issueType',
   'severity',
   'stepsToReproduce',
   'expectedBehavior',
@@ -158,6 +171,34 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
     if (reassigned) {
       await emitEvent('task.assigned', task.toObject(), { actorId: req.user.id });
     }
+
+    res.json({ task });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Lets any authenticated user - critically, a developer, who otherwise can't
+// reassign tasks (PUT /:id is admin/sales only) - pick up an unclaimed item
+// from the Backlog view. Deliberately narrow: it only ever sets assigneeId
+// to the caller themselves, and only while the task is still unassigned, so
+// it can't be used to reassign someone else's work.
+router.patch('/:id/claim', async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (task.assigneeId) return res.status(409).json({ error: 'Task is already assigned' });
+
+    task.assigneeId = req.user.id;
+    await task.save();
+    await logAudit({
+      entityType: 'task',
+      entityId: task._id,
+      action: 'reassigned',
+      actorId: req.user.id,
+      changes: { from: null, to: task.assigneeId },
+    });
+    await emitEvent('task.assigned', task.toObject(), { actorId: req.user.id });
 
     res.json({ task });
   } catch (err) {

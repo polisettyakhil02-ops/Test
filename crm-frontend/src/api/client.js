@@ -101,6 +101,19 @@ export const api = {
     quickParse: (body) => request('/api/leads/quick-parse', { method: 'POST', body }),
   },
 
+  projects: {
+    list: (params = {}) => {
+      const qs = new URLSearchParams(params).toString();
+      return request(`/api/projects${qs ? `?${qs}` : ''}`);
+    },
+    get: (id) => request(`/api/projects/${id}`),
+    create: (body) => request('/api/projects', { method: 'POST', body }),
+    update: (id, body) => request(`/api/projects/${id}`, { method: 'PUT', body }),
+    updateScratchpad: (id, scratchpad) => request(`/api/projects/${id}/scratchpad`, { method: 'PATCH', body: { scratchpad } }),
+    archive: (id) => request(`/api/projects/${id}/archive`, { method: 'PATCH' }),
+    restore: (id) => request(`/api/projects/${id}/restore`, { method: 'PATCH' }),
+  },
+
   tasks: {
     list: (params = {}) => {
       const qs = new URLSearchParams(params).toString();
@@ -110,6 +123,7 @@ export const api = {
     create: (body) => request('/api/tasks', { method: 'POST', body }),
     update: (id, body) => request(`/api/tasks/${id}`, { method: 'PUT', body }),
     setStatus: (id, status) => request(`/api/tasks/${id}/status`, { method: 'PATCH', body: { status } }),
+    claim: (id) => request(`/api/tasks/${id}/claim`, { method: 'PATCH' }),
     remove: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
     addSubtask: (id, title) => request(`/api/tasks/${id}/subtasks`, { method: 'POST', body: { title } }),
     updateSubtask: (id, subtaskId, body) => request(`/api/tasks/${id}/subtasks/${subtaskId}`, { method: 'PATCH', body }),

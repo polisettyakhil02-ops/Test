@@ -10,6 +10,7 @@ import Contacts from './pages/Contacts';
 import ContactDetail from './pages/ContactDetail';
 import Leads from './pages/Leads';
 import LeadDetail from './pages/LeadDetail';
+import Projects from './pages/Projects';
 import Deals from './pages/Deals';
 import DealDetail from './pages/DealDetail';
 import RegisterDeal from './pages/RegisterDeal';
@@ -118,6 +119,7 @@ export default function App() {
         />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
+        <Route path="/projects" element={<Projects />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/boards" element={<Boards />} />
         <Route
