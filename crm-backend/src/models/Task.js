@@ -13,6 +13,18 @@ const subtaskSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Embedded, not a separate collection - a snippet belongs to exactly one
+// task and is never queried on its own, same reasoning as subtasks above.
+const codeSnippetSchema = new mongoose.Schema(
+  {
+    label: { type: String, trim: true },
+    language: { type: String, trim: true, default: 'text' },
+    code: { type: String, required: true },
+    addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  },
+  { timestamps: true }
+);
+
 const taskSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
@@ -41,6 +53,7 @@ const taskSchema = new mongoose.Schema(
     leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
     dueDate: { type: Date },
     subtasks: { type: [subtaskSchema], default: [] },
+    codeSnippets: { type: [codeSnippetSchema], default: [] },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }

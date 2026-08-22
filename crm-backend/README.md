@@ -73,6 +73,8 @@ All routes except `/health` and `POST /api/auth/login` require
 | `POST /api/tasks/:id/subtasks` | Add a checklist item - same permission as `PATCH /:id/status` (admin/sales, or the assignee) |
 | `PATCH /api/tasks/:id/subtasks/:subtaskId` | Toggle `done` and/or rename a subtask |
 | `DELETE /api/tasks/:id/subtasks/:subtaskId` | Remove a subtask |
+| `POST /api/tasks/:id/snippets` | Add a code snippet (`label`, `language`, `code`) - same permission as subtasks |
+| `DELETE /api/tasks/:id/snippets/:snippetId` | Remove a code snippet |
 | `GET/POST /api/activities` | Notes/calls/emails/meetings/stage changes/comments, scoped to `?dealId=`, `?contactId=`, `?leadId=`, or `?taskId=`. `dealId`/`contactId`/`leadId` activities are admin/sales only (same restriction as the records themselves); `taskId` activities (a task's comment thread) are open to any role, same as the task |
 | `GET /api/dashboard` | Role-scoped. Admin/sales: deals by stage + total/weighted value, win rate, weighted forecast, tasks by status/assignee, overdue task count, recent activity feed. Developer: their own tasks only - by status, overdue count, task list - no pipeline value or win rate |
 | `GET /api/search?q=` | Admin/sales only - it only searches companies/contacts/deals, all of which are already admin/sales-only. Case-insensitive name/title match, up to 6 results each, archived records excluded |
@@ -138,6 +140,10 @@ worth revisiting if the team grows.
 - **Task.subtasks** is an embedded array (`{ title, done }`), not a separate
   collection - a checklist belongs to exactly one task and is never queried
   on its own.
+- **Task.codeSnippets** is the same pattern - an embedded array
+  (`{ label, language, code, addedBy }`) for pasting a code fragment or
+  stack trace onto a task or bug, shown in `TaskDetail.jsx` alongside
+  subtasks/attachments/comments.
 - **Activity** attaches to a `taskId`, `dealId`, `contactId`, or `leadId` -
   a task's comment thread reuses the same model, feed, and API shape as
   deal/contact/lead notes instead of being a separate system.

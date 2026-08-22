@@ -251,6 +251,40 @@ router.delete('/:id/subtasks/:subtaskId', async (req, res, next) => {
   }
 });
 
+router.post('/:id/snippets', async (req, res, next) => {
+  try {
+    const { label, language, code } = req.body || {};
+    if (!code || !code.trim()) return res.status(400).json({ error: 'code is required' });
+
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (!canEditTaskWork(req, task)) return res.status(403).json({ error: 'Forbidden' });
+
+    task.codeSnippets.push({ label, language: language || 'text', code, addedBy: req.user.id });
+    await task.save();
+    res.status(201).json({ task });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/snippets/:snippetId', async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (!canEditTaskWork(req, task)) return res.status(403).json({ error: 'Forbidden' });
+
+    const snippet = task.codeSnippets.id(req.params.snippetId);
+    if (!snippet) return res.status(404).json({ error: 'Snippet not found' });
+
+    task.codeSnippets.pull({ _id: req.params.snippetId });
+    await task.save();
+    res.json({ task });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
   try {
     const task = await Task.findByIdAndDelete(req.params.id);

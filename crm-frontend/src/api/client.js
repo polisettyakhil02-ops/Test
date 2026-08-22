@@ -114,6 +114,8 @@ export const api = {
     addSubtask: (id, title) => request(`/api/tasks/${id}/subtasks`, { method: 'POST', body: { title } }),
     updateSubtask: (id, subtaskId, body) => request(`/api/tasks/${id}/subtasks/${subtaskId}`, { method: 'PATCH', body }),
     removeSubtask: (id, subtaskId) => request(`/api/tasks/${id}/subtasks/${subtaskId}`, { method: 'DELETE' }),
+    addSnippet: (id, body) => request(`/api/tasks/${id}/snippets`, { method: 'POST', body }),
+    removeSnippet: (id, snippetId) => request(`/api/tasks/${id}/snippets/${snippetId}`, { method: 'DELETE' }),
   },
 
   activities: {

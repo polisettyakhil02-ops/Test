@@ -21,6 +21,7 @@ export default function TaskDetail() {
 
   const [commentText, setCommentText] = useState('');
   const [subtaskTitle, setSubtaskTitle] = useState('');
+  const [snippetForm, setSnippetForm] = useState({ label: '', language: 'javascript', code: '' });
   const [uploading, setUploading] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
   const [detailsForm, setDetailsForm] = useState({
@@ -150,6 +151,27 @@ export default function TaskDetail() {
   async function removeSubtask(subtaskId) {
     try {
       await api.tasks.removeSubtask(id, subtaskId);
+      loadTask();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function addSnippet(e) {
+    e.preventDefault();
+    if (!snippetForm.code.trim()) return;
+    try {
+      await api.tasks.addSnippet(id, snippetForm);
+      setSnippetForm({ label: '', language: snippetForm.language, code: '' });
+      loadTask();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function removeSnippet(snippetId) {
+    try {
+      await api.tasks.removeSnippet(id, snippetId);
       loadTask();
     } catch (err) {
       setError(err.message);
@@ -373,6 +395,50 @@ export default function TaskDetail() {
               </li>
             ))}
           </ul>
+        )}
+      </div>
+
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <h2>Code snippets</h2>
+        {canEditWork && (
+          <form onSubmit={addSnippet} style={{ marginBottom: '1rem' }} className="form-grid">
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                style={{ flex: 1, padding: '0.5rem', border: '1px solid var(--color-border)', borderRadius: 6 }}
+                placeholder="Label (optional)"
+                value={snippetForm.label}
+                onChange={(e) => setSnippetForm({ ...snippetForm, label: e.target.value })}
+              />
+              <select value={snippetForm.language} onChange={(e) => setSnippetForm({ ...snippetForm, language: e.target.value })}>
+                {['javascript', 'typescript', 'python', 'json', 'bash', 'sql', 'text'].map((lang) => (
+                  <option key={lang} value={lang}>{lang}</option>
+                ))}
+              </select>
+            </div>
+            <textarea
+              rows={4}
+              style={{ fontFamily: 'var(--font-mono, monospace)' }}
+              placeholder="Paste a code fragment or stack trace…"
+              value={snippetForm.code}
+              onChange={(e) => setSnippetForm({ ...snippetForm, code: e.target.value })}
+            />
+            <button type="submit" className="primary">Add snippet</button>
+          </form>
+        )}
+        {task.codeSnippets.length === 0 ? (
+          <p>No snippets yet.</p>
+        ) : (
+          task.codeSnippets.map((s) => (
+            <div key={s._id} style={{ marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <span className="stat-label">{s.label || 'Untitled'} · {s.language}</span>
+                {canEditWork && <button type="button" onClick={() => removeSnippet(s._id)}>Remove</button>}
+              </div>
+              <pre style={{ background: 'var(--color-code-bg, #f4f4f5)', padding: '0.6rem', borderRadius: 6, overflowX: 'auto', margin: 0 }}>
+                <code>{s.code}</code>
+              </pre>
+            </div>
+          ))
         )}
       </div>
 
