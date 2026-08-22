@@ -61,7 +61,8 @@ export default function Tasks() {
   const dealLabel = (t) => {
     if (!t.dealId) return 'Internal — no client';
     const company = t.dealId.companyId?.name;
-    return company ? `${company} — ${t.dealId.title}` : t.dealId.title;
+    if (!company || t.dealId.title.toLowerCase().startsWith(company.toLowerCase())) return t.dealId.title;
+    return `${company} — ${t.dealId.title}`;
   };
 
   return (
