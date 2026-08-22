@@ -3,8 +3,20 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { LEAD_STAGES } from '../components/LeadStageBadge';
+import { LeadDropZone } from '../components/LeadDropZone';
 import { downloadCsv } from '../lib/csv';
 import { DndBoard } from '../components/DndBoard';
+
+const emptyForm = {
+  name: '',
+  companyName: '',
+  companyWebsite: '',
+  contactName: '',
+  contactEmail: '',
+  linkedinUrl: '',
+  enrichment: null,
+  battleCard: null,
+};
 
 export default function Leads() {
   const { user } = useAuth();
@@ -14,7 +26,7 @@ export default function Leads() {
   const [error, setError] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState('');
-  const [form, setForm] = useState({ name: '', companyName: '', contactEmail: '' });
+  const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
 
   function load(archived) {
@@ -69,12 +81,25 @@ export default function Leads() {
     if (!form.name.trim()) return;
     try {
       await api.leads.create(form);
-      setForm({ name: '', companyName: '', contactEmail: '' });
+      setForm(emptyForm);
       setShowForm(false);
       load(showArchived);
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  function applyParsed(result) {
+    setForm((f) => ({
+      ...f,
+      name: f.name || result.companyName || result.contactName || f.name,
+      companyName: result.companyName || f.companyName,
+      companyWebsite: result.companyWebsite || f.companyWebsite,
+      contactName: result.contactName || f.contactName,
+      linkedinUrl: result.linkedinUrl || f.linkedinUrl,
+      enrichment: result.enrichment || f.enrichment,
+      battleCard: result.battleCard || f.battleCard,
+    }));
   }
 
   function exportCsv() {
@@ -102,25 +127,43 @@ export default function Leads() {
       {error && <div className="error-banner">{error}</div>}
 
       {showForm && (
-        <form className="form-grid card" style={{ marginBottom: '1rem' }} onSubmit={handleCreate}>
-          <label>
-            Name
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          </label>
-          <label>
-            Company
-            <input value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
-          </label>
-          <label>
-            Contact email
-            <input
-              type="email"
-              value={form.contactEmail}
-              onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
-            />
-          </label>
-          <button type="submit" className="primary">Create</button>
-        </form>
+        <>
+          <LeadDropZone onApply={applyParsed} />
+          <form className="form-grid card" style={{ marginBottom: '1rem' }} onSubmit={handleCreate}>
+            <label>
+              Name
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </label>
+            <label>
+              Company
+              <input value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
+            </label>
+            <label>
+              Company website
+              <input value={form.companyWebsite} onChange={(e) => setForm({ ...form, companyWebsite: e.target.value })} />
+            </label>
+            <label>
+              Contact name
+              <input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
+            </label>
+            <label>
+              Contact email
+              <input
+                type="email"
+                value={form.contactEmail}
+                onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
+              />
+            </label>
+            <label>
+              LinkedIn
+              <input value={form.linkedinUrl} onChange={(e) => setForm({ ...form, linkedinUrl: e.target.value })} />
+            </label>
+            {form.battleCard && (
+              <p className="stat-label">Discovery guide attached: {form.battleCard.industry}</p>
+            )}
+            <button type="submit" className="primary">Create</button>
+          </form>
+        </>
       )}
 
       <div className="filter-bar">

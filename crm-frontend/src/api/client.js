@@ -98,6 +98,7 @@ export const api = {
     restore: (id) => request(`/api/leads/${id}/restore`, { method: 'PATCH' }),
     remove: (id) => request(`/api/leads/${id}`, { method: 'DELETE' }),
     convert: (id, body = {}) => request(`/api/leads/${id}/convert`, { method: 'POST', body }),
+    quickParse: (body) => request('/api/leads/quick-parse', { method: 'POST', body }),
   },
 
   tasks: {

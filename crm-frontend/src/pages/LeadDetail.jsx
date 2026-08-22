@@ -119,6 +119,27 @@ export default function LeadDetail() {
         </table>
       </div>
 
+      {lead.battleCard && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <h2>Discovery guide: {lead.battleCard.industry}</h2>
+          <p className="stat-label" style={{ marginTop: '-0.4rem' }}>
+            Matched from the company website's description on keywords: {lead.battleCard.matchedKeywords.join(', ')}
+          </p>
+          <h3 style={{ marginBottom: '0.3rem' }}>Questions</h3>
+          <ul style={{ marginTop: 0 }}>
+            {lead.battleCard.questions.map((q, i) => (
+              <li key={i}>{q}</li>
+            ))}
+          </ul>
+          <h3 style={{ marginBottom: '0.3rem' }}>Talking points</h3>
+          <ul style={{ marginTop: 0 }}>
+            {lead.battleCard.talkingPoints.map((t, i) => (
+              <li key={i}>{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h2>Tasks for this lead</h2>
         {canWrite && !lead.convertedToDealId && (

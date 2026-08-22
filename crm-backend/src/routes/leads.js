@@ -1,4 +1,5 @@
 const express = require('express');
+const ogs = require('open-graph-scraper');
 const Lead = require('../models/Lead');
 const Company = require('../models/Company');
 const Contact = require('../models/Contact');
@@ -9,6 +10,8 @@ const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
 const { logAudit } = require('../lib/audit');
 const { emitEvent } = require('../lib/events');
+const { matchBattleCard } = require('../lib/battleCards');
+const { parseNameFromLinkedInUrl } = require('../lib/linkedin');
 
 const router = express.Router();
 
@@ -38,10 +41,71 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+// Sales "Smart Drop Zone": stateless scrape-and-suggest, never touches the
+// DB. The rep reviews/edits the suggested fields in the New Lead form and
+// only POST / actually creates anything - re-running this as many times as
+// needed leaves no junk records behind.
+router.post('/quick-parse', async (req, res, next) => {
+  try {
+    const { websiteUrl, linkedinUrl } = req.body || {};
+    if (!websiteUrl && !linkedinUrl) {
+      return res.status(400).json({ error: 'websiteUrl or linkedinUrl is required' });
+    }
+
+    const result = {
+      companyName: null,
+      companyWebsite: websiteUrl || null,
+      contactName: null,
+      linkedinUrl: linkedinUrl || null,
+      enrichment: null,
+      battleCard: null,
+      enrichmentError: null,
+    };
+
+    if (websiteUrl) {
+      try {
+        const { result: og } = await ogs({ url: websiteUrl, timeout: 8 });
+        result.enrichment = {
+          ogTitle: og.ogTitle || null,
+          ogDescription: og.ogDescription || null,
+          ogImage: og.ogImage?.[0]?.url || null,
+          ogSiteName: og.ogSiteName || null,
+          scrapedAt: new Date(),
+        };
+        result.companyName = og.ogSiteName || og.ogTitle || null;
+        result.battleCard = matchBattleCard(og.ogDescription);
+      } catch (err) {
+        // A dead/unreachable/scrape-blocking site shouldn't fail the whole
+        // request - the LinkedIn-derived name below can still come back.
+        result.enrichmentError = 'Could not read that website (unreachable, or it blocks scraping).';
+      }
+    }
+
+    if (linkedinUrl) {
+      result.contactName = parseNameFromLinkedInUrl(linkedinUrl);
+    }
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', async (req, res, next) => {
   try {
-    const { name, companyName, companyWebsite, contactName, contactEmail, contactPhone, linkedinUrl, source, ownerId } =
-      req.body || {};
+    const {
+      name,
+      companyName,
+      companyWebsite,
+      contactName,
+      contactEmail,
+      contactPhone,
+      linkedinUrl,
+      source,
+      ownerId,
+      enrichment,
+      battleCard,
+    } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
 
     const lead = await Lead.create({
@@ -54,6 +118,8 @@ router.post('/', async (req, res, next) => {
       linkedinUrl,
       source,
       ownerId: ownerId || req.user.id,
+      enrichment,
+      battleCard,
       createdBy: req.user.id,
     });
 

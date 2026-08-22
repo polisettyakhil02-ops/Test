@@ -35,7 +35,7 @@ accounts so you can see role-based behavior:
 Change these before seeding against anything but a throwaway local database.
 
 ```bash
-npm test    # 36 unit tests: password hashing, JWT, role permissions, rate limiter, automation rule engine, weighted forecast - no DB required
+npm test    # 51 unit tests: password hashing, JWT, role permissions, rate limiter, automation rule engine, weighted forecast, battle card matching, LinkedIn name parsing - no DB required
 ```
 
 File attachments are written to `UPLOAD_DIR` (default `./uploads`, gitignored)
@@ -57,6 +57,7 @@ All routes except `/health` and `POST /api/auth/login` require
 | `GET /api/auth/me` | Current user |
 | `PATCH /api/auth/me/password` | Self-service password change - `{ currentPassword, newPassword }` |
 | `GET/POST/PATCH /api/users` | Admin only (reads included) - manage team accounts |
+| `POST /api/leads/quick-parse` | Admin/sales. Stateless "Smart Drop Zone" - scrapes `websiteUrl` (OpenGraph tags) and/or regex-parses a name out of `linkedinUrl`, and matches a static battle card template. Doesn't touch the DB - see **Smart Drop Zone** below |
 | `GET/POST/PUT/DELETE /api/leads` | Admin/sales only (reads included). Excludes archived unless `?archived=true`; filter by `?stage=`, `?ownerId=`. `DELETE` (permanent) is admin-only |
 | `PATCH /api/leads/:id/stage` | Admin/sales. Moves the lead's own stage pipeline (`new`→`contacted`→`qualified`→`nurturing`/`disqualified`) - distinct from `Deal.STAGES`. Rejected once the lead has been converted |
 | `PATCH /api/leads/:id/archive`, `/restore` | Same pattern as companies |
@@ -113,7 +114,8 @@ worth revisiting if the team grows.
   (`new` -> `contacted` -> `qualified` -> `nurturing`/`disqualified`,
   `Lead.STAGES` - separate from `Deal.STAGES`) and enrichment fields
   (`companyName`/`companyWebsite`, `contactName`/`contactEmail`/`contactPhone`,
-  `linkedinUrl`, `source`). `POST /api/leads/:id/convert` graduates it into a
+  `linkedinUrl`, `source`, plus `enrichment`/`battleCard` - see **Smart Drop
+  Zone** below). `POST /api/leads/:id/convert` graduates it into a
   real `Company`/`Contact`/`Deal` - see **Leads & conversion** below.
 - **Deal** stays the unified pipeline object once a lead converts (or when
   created directly, bypassing the lead stage entirely) - `stage` starts at
@@ -211,6 +213,35 @@ entity, an admin can already write a rule like "on `task.created`, if
 `severity` equals `critical`, notify the team lead" from the existing
 `/rules` UI - no engine change was needed to support severity-based
 automation.
+
+## Smart Drop Zone (non-AI lead enrichment)
+
+`POST /api/leads/quick-parse` is the backend for the frontend's drag-and-drop
+"Smart drop zone" on the New Lead form. It's deliberately **not** AI/LLM
+based - three small, predictable pieces:
+
+- **OpenGraph scrape** (`open-graph-scraper`) of `websiteUrl` for company
+  name/description/logo. A blocked or unreachable site doesn't fail the
+  whole request - it comes back as `enrichmentError`, and any LinkedIn
+  result still returns.
+- **LinkedIn name parsing** (`src/lib/linkedin.js`, pure, unit tested) -
+  regexes the profile slug out of `linkedinUrl` and title-cases it, stripping
+  a trailing hex/digit id segment LinkedIn often appends
+  (`jordan-lee-4a2b1c9` -> "Jordan Lee"). Best-effort only; it only ever sees
+  what's in the URL.
+- **Battle card matching** (`src/lib/battleCards.js`, pure, unit tested) -
+  a small static table of `{ industry, keywords, questions, talkingPoints }`
+  templates (SaaS, retail, manufacturing). The scraped description is scored
+  against each template's keyword list; the highest-scoring template is
+  returned (or `null` if nothing matched). Editing the discovery questions
+  for an industry is a one-file change, no redeploy of any AI prompt or
+  model needed.
+
+The route itself never touches the database - it returns suggested field
+values for the frontend's New Lead form to prefill, and the rep can edit
+everything before the real `POST /api/leads` (which now also accepts
+`enrichment`/`battleCard` in its body) actually creates anything. Re-running
+a parse costs nothing and leaves no partial records behind.
 
 ## Leads & conversion
 

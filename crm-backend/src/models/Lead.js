@@ -24,6 +24,26 @@ const leadSchema = new mongoose.Schema(
     // and never re-enters the stage pipeline.
     convertedToDealId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deal', default: null },
     convertedAt: { type: Date, default: null },
+    // Set by POST /api/leads/quick-parse (the sales "Smart Drop Zone") when
+    // the rep uses its suggested fields - raw OpenGraph scrape of the
+    // company website, kept so the page doesn't need to be re-scraped just
+    // to look at it again.
+    enrichment: {
+      ogTitle: { type: String, trim: true },
+      ogDescription: { type: String, trim: true },
+      ogImage: { type: String, trim: true },
+      ogSiteName: { type: String, trim: true },
+      scrapedAt: { type: Date },
+    },
+    // A snapshot of the matched src/lib/battleCards.js template at parse
+    // time, not a live reference - if the static templates change later,
+    // a lead keeps the discovery guide it was actually given.
+    battleCard: {
+      industry: { type: String, trim: true },
+      matchedKeywords: { type: [String], default: [] },
+      questions: { type: [String], default: [] },
+      talkingPoints: { type: [String], default: [] },
+    },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
