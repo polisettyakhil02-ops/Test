@@ -1,11 +1,11 @@
 const express = require('express');
 const Deal = require('../models/Deal');
 const Activity = require('../models/Activity');
-const Notification = require('../models/Notification');
 const { STAGES } = require('../models/Deal');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
 const { logAudit } = require('../lib/audit');
+const { emitEvent } = require('../lib/events');
 
 const router = express.Router();
 
@@ -106,6 +106,8 @@ router.post('/', async (req, res, next) => {
       changes: registeredDespiteConflict ? { registeredDespiteConflict: true } : undefined,
     });
 
+    await emitEvent('deal.created', deal.toObject(), { actorId: req.user.id });
+
     res.status(201).json({ deal });
   } catch (err) {
     next(err);
@@ -153,14 +155,9 @@ router.patch('/:id/stage', async (req, res, next) => {
       changes: { from: previousStage, to: stage, reason: reason || undefined },
     });
 
-    if (deal.ownerId && String(deal.ownerId) !== String(req.user.id)) {
-      await Notification.create({
-        userId: deal.ownerId,
-        type: 'deal_stage_changed',
-        message: `"${deal.title}" moved from ${previousStage} to ${stage}`,
-        link: `/deals/${deal._id}`,
-      });
-    }
+    // previousStage isn't a real field on Deal - it only exists here so a
+    // rule's message/condition can reference {{previousStage}}.
+    await emitEvent('deal.stage_changed', { ...deal.toObject(), previousStage }, { actorId: req.user.id });
 
     res.json({ deal });
   } catch (err) {

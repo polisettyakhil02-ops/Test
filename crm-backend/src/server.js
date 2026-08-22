@@ -13,6 +13,7 @@ const notificationRoutes = require('./routes/notifications');
 const searchRoutes = require('./routes/search');
 const attachmentRoutes = require('./routes/attachments');
 const auditLogRoutes = require('./routes/auditLog');
+const ruleRoutes = require('./routes/rules');
 const { errorHandler } = require('./middleware/errorHandler');
 
 function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
@@ -39,6 +40,7 @@ function createApp({ jwtSecret, jwtExpiresIn, corsOrigin }) {
   app.use('/api/search', searchRoutes);
   app.use('/api/attachments', attachmentRoutes);
   app.use('/api/audit-log', auditLogRoutes);
+  app.use('/api/rules', ruleRoutes);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use(errorHandler);

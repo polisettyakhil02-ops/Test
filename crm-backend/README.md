@@ -35,7 +35,7 @@ accounts so you can see role-based behavior:
 Change these before seeding against anything but a throwaway local database.
 
 ```bash
-npm test    # 18 unit tests: password hashing, JWT, role permissions, rate limiter - no DB required
+npm test    # 28 unit tests: password hashing, JWT, role permissions, rate limiter, automation rule engine - no DB required
 ```
 
 File attachments are written to `UPLOAD_DIR` (default `./uploads`, gitignored)
@@ -77,6 +77,7 @@ All routes except `/health` and `POST /api/auth/login` require
 | `GET /api/attachments/:id/download` | Streams the file |
 | `DELETE /api/attachments/:id` | The uploader, or admin/sales |
 | `GET /api/audit-log?entityType=&entityId=&limit=` | Admin only. Who did what, when - created/updated/archived/restored/deleted/stage_changed/status_changed/reassigned - across companies, contacts, deals, and tasks |
+| `GET/POST/PATCH/DELETE /api/rules` | Admin only. Manage automation rules - see **Automation** below. `GET` also returns `eventTypes`/`actionTypes`/`conditionOps` so the frontend form doesn't hardcode them |
 
 ## Roles & permissions
 
@@ -111,9 +112,10 @@ worth revisiting if the team grows.
 - **Company/Contact/Deal** have an `archived` flag rather than being hard-deleted
   by default - list endpoints exclude archived records unless `?archived=true`.
   Permanent `DELETE` still exists but is admin-only.
-- **Notification** is created on two events - a task being assigned, and a
-  deal's stage changing when the mover isn't the deal's owner - and read by
-  the recipient via `GET /api/notifications`.
+- **Notification** is created by the automation engine (see below), not
+  hardcoded route logic. `type` includes `'automation'` for rule-generated
+  notifications, alongside the older `'task_assigned'`/`'deal_stage_changed'`
+  values. Read by the recipient via `GET /api/notifications`.
 - **Task.subtasks** is an embedded array (`{ title, done }`), not a separate
   collection - a checklist belongs to exactly one task and is never queried
   on its own.
@@ -125,8 +127,48 @@ worth revisiting if the team grows.
 - **AuditLog** is a flat, append-only record of who did what and when
   (`action` + a small `changes` diff, not a full before/after snapshot) -
   wired into create/update/archive/restore/delete on companies, contacts,
-  and deals, and create/update/reassign/status-change/delete on tasks.
+  and deals, create/update/reassign/status-change/delete on tasks, and
+  create/update/enable/disable/delete on automation rules.
   Viewable at `GET /api/audit-log` (admin only).
+- **Rule** defines an automation: a `trigger` (an event name plus an
+  optional list of `{ field, op, value }` conditions, all of which must
+  match) and one or more `actions` (`notify` or `create_task`, each with a
+  `params` object - see below).
+
+## Automation
+
+Events that used to trigger hardcoded notification logic directly in the
+route handlers (`deal.created`, `deal.stage_changed`, `task.created`,
+`task.assigned`, `task.status_changed`) now go through a small event/rule
+engine instead, so an admin can add, disable, or retarget behavior from
+`GET/POST/PATCH/DELETE /api/rules` without a code change:
+
+- `src/lib/ruleEngine.js` is pure, DB-free logic - condition matching
+  (`matchesConditions`) and `{{field}}` template substitution
+  (`renderTemplate`) against a plain entity object. Unit tested in
+  `test/ruleEngine.test.js` with no database involved.
+- `src/lib/events.js` is the DB-touching half: `emitEvent(event, entity,
+  context)` loads enabled rules for that event, checks each rule's
+  conditions against the entity, and runs its actions. A rule action
+  failing (or the whole rule-load query failing) is caught and logged,
+  never thrown back into the route that emitted the event - automation is
+  best-effort, it must never block the underlying create/update.
+- Routes call `emitEvent` right after the fact happens (e.g.
+  `deals.js`'s stage-change route emits `deal.stage_changed` with a
+  `previousStage` field spliced onto the deal object purely so a rule's
+  message/condition can reference `{{previousStage}}` - it isn't a real
+  field on the Deal model).
+- `notify` actions read a target user id off the entity (via
+  `action.params.targetField`, e.g. `"ownerId"`) and skip silently if
+  that field is empty or resolves to the user who caused the event
+  (no self-notifications). `create_task` actions create a `Task`,
+  optionally assigning it (`assigneeField`) and linking it to the
+  triggering deal (`linkToDeal: true`).
+- `npm run seed` creates 3 default rules replicating what used to be
+  built-in behavior (notify on task assignment, notify the deal owner on
+  stage change) plus one new example (auto-create a delivery kickoff task
+  when a deal reaches `won`) - seeding is idempotent, skipped if any rule
+  already exists.
 
 ## Before exposing this to real users
 

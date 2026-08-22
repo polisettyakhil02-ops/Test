@@ -1,11 +1,11 @@
 const express = require('express');
 const Task = require('../models/Task');
-const Notification = require('../models/Notification');
 const { STATUSES } = require('../models/Task');
 const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
 const { canWrite } = require('../lib/permissions');
 const { logAudit } = require('../lib/audit');
+const { emitEvent } = require('../lib/events');
 
 const router = express.Router();
 
@@ -65,16 +65,12 @@ router.post('/', requireRole('admin', 'sales'), async (req, res, next) => {
       createdBy: req.user.id,
     });
 
-    if (task.assigneeId && String(task.assigneeId) !== String(req.user.id)) {
-      await Notification.create({
-        userId: task.assigneeId,
-        type: 'task_assigned',
-        message: `You were assigned "${task.title}"`,
-        link: '/tasks',
-      });
-    }
-
     await logAudit({ entityType: 'task', entityId: task._id, action: 'created', actorId: req.user.id });
+
+    await emitEvent('task.created', task.toObject(), { actorId: req.user.id });
+    if (task.assigneeId) {
+      await emitEvent('task.assigned', task.toObject(), { actorId: req.user.id });
+    }
 
     res.status(201).json({ task });
   } catch (err) {
@@ -95,14 +91,6 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
     );
 
     const reassigned = task.assigneeId && String(task.assigneeId) !== String(previous.assigneeId || '');
-    if (reassigned && String(task.assigneeId) !== String(req.user.id)) {
-      await Notification.create({
-        userId: task.assigneeId,
-        type: 'task_assigned',
-        message: `You were assigned "${task.title}"`,
-        link: '/tasks',
-      });
-    }
 
     await logAudit({
       entityType: 'task',
@@ -111,6 +99,10 @@ router.put('/:id', requireRole('admin', 'sales'), async (req, res, next) => {
       actorId: req.user.id,
       changes: reassigned ? { from: previous.assigneeId, to: task.assigneeId } : undefined,
     });
+
+    if (reassigned) {
+      await emitEvent('task.assigned', task.toObject(), { actorId: req.user.id });
+    }
 
     res.json({ task });
   } catch (err) {
@@ -139,6 +131,11 @@ router.patch('/:id/status', async (req, res, next) => {
       actorId: req.user.id,
       changes: { from: previousStatus, to: status },
     });
+
+    // previousStatus isn't a real field on Task - it only exists here so a
+    // rule's message/condition can reference {{previousStatus}}.
+    await emitEvent('task.status_changed', { ...task.toObject(), previousStatus }, { actorId: req.user.id });
+
     res.json({ task });
   } catch (err) {
     next(err);

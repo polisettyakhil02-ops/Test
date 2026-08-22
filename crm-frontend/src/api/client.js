@@ -142,6 +142,13 @@ export const api = {
     remove: (id) => request(`/api/attachments/${id}`, { method: 'DELETE' }),
   },
 
+  rules: {
+    list: () => request('/api/rules'),
+    create: (body) => request('/api/rules', { method: 'POST', body }),
+    update: (id, body) => request(`/api/rules/${id}`, { method: 'PATCH', body }),
+    remove: (id) => request(`/api/rules/${id}`, { method: 'DELETE' }),
+  },
+
   dashboard: () => request('/api/dashboard'),
 
   search: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),

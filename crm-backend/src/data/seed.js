@@ -9,6 +9,7 @@ const Company = require('../models/Company');
 const Contact = require('../models/Contact');
 const Deal = require('../models/Deal');
 const Task = require('../models/Task');
+const Rule = require('../models/Rule');
 const { hashPassword } = require('../lib/password');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dominare_crm';
@@ -72,6 +73,59 @@ async function main() {
     console.log('Created sample company, contact, deal and task.');
   } else {
     console.log('Sample data already present, skipping.');
+  }
+
+  const existingRule = await Rule.findOne();
+  if (!existingRule) {
+    await Rule.create([
+      {
+        name: 'Notify on task assignment',
+        trigger: { event: 'task.assigned', conditions: [] },
+        actions: [
+          {
+            type: 'notify',
+            params: {
+              targetField: 'assigneeId',
+              messageTemplate: 'You were assigned "{{title}}"',
+              linkTemplate: '/tasks',
+            },
+          },
+        ],
+        createdBy: admin._id,
+      },
+      {
+        name: 'Notify deal owner on stage change',
+        trigger: { event: 'deal.stage_changed', conditions: [] },
+        actions: [
+          {
+            type: 'notify',
+            params: {
+              targetField: 'ownerId',
+              messageTemplate: '"{{title}}" moved from {{previousStage}} to {{stage}}',
+              linkTemplate: '/deals/{{_id}}',
+            },
+          },
+        ],
+        createdBy: admin._id,
+      },
+      {
+        name: 'Auto-create delivery kickoff task on Won',
+        trigger: { event: 'deal.stage_changed', conditions: [{ field: 'stage', op: 'equals', value: 'won' }] },
+        actions: [
+          {
+            type: 'create_task',
+            params: {
+              titleTemplate: 'Kick off delivery for "{{title}}"',
+              linkToDeal: true,
+            },
+          },
+        ],
+        createdBy: admin._id,
+      },
+    ]);
+    console.log('Created 3 default automation rules.');
+  } else {
+    console.log('Automation rules already present, skipping.');
   }
 
   console.log('Seed complete.');

@@ -33,6 +33,7 @@ npm run preview  # serve the production build locally
 | `/tasks` | Any role | Task board grouped by status; developers see/edit only their own by default, and see which client each task is for as a plain read-only label (no link into the pipeline). Admin/sales can create tasks *and reassign any existing task's assignee directly from the board* (not just at creation time) - the (re)assignee gets a notification. Both this board and the Pipeline board support **drag-and-drop** (`src/components/DndBoard.jsx`) to move a card between columns, in addition to the status/stage dropdown each card still has |
 | `/tasks/:id` | Any role | Task detail: status/assignee, an editable description/priority/due-date (admin/sales), a subtask checklist, file attachments, and a comment thread - the same write rule throughout as the board's status dropdown (admin/sales, or the assignee) |
 | `/users` | Admin only | Create team accounts, activate/deactivate |
+| `/rules` | Admin only | **Automation.** Create/edit/delete rules that fire on a CRM event (deal created/stage changed, task created/assigned/status changed) with an optional single field-match condition, and either send a notification or create a task - templated with `{{field}}` placeholders. Enable/disable any rule with a checkbox without deleting it |
 | `/profile` | Any role | Change your own password |
 
 A developer's nav doesn't show Pipeline, Companies, or Contacts at all - not

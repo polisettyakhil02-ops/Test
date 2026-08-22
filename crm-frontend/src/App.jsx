@@ -13,6 +13,7 @@ import RegisterDeal from './pages/RegisterDeal';
 import Tasks from './pages/Tasks';
 import TaskDetail from './pages/TaskDetail';
 import Users from './pages/Users';
+import Rules from './pages/Rules';
 import Profile from './pages/Profile';
 
 // Companies, contacts, and the pipeline are client/deal data - admin/sales
@@ -98,6 +99,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={['admin']}>
               <Users />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/rules"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <Rules />
             </ProtectedRoute>
           }
         />
