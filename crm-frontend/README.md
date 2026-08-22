@@ -41,22 +41,49 @@ npm run preview  # serve the production build locally
 | `/boards`, `/boards/:id` | Any role | **Whiteboard.** A list of shared canvases and a live collaborative drawing surface (embeds [tldraw](https://tldraw.dev)) - for architecture sketches, meeting notes, or creative briefs/storyboards. Every edit anyone makes on a board appears live for everyone else viewing it, over the same kind of Socket.IO connection chat uses (a separate `/board` namespace, `src/lib/socket.js`). The canvas code (`pages/BoardDetail.jsx`, tldraw itself) is lazy-loaded (`React.lazy`) so its ~1.7MB doesn't load until someone actually opens a board |
 | `/profile` | Any role | Change your own password |
 
-A developer's nav doesn't show Leads, Pipeline, Companies, or Contacts at all - not
-just because there's nothing useful there, but because the backend rejects
-those requests outright (`403`). The routes are also role-gated in
+## Navigation
+
+Navigation is a collapsible left **sidebar** (`src/components/Layout.jsx`,
+`.sidebar` in `base.css`), not a top nav bar - the old horizontal nav ran out
+of room once Boards, Projects, and Automation were added and started
+overflowing on anything narrower than a very wide screen. The sidebar groups
+links into role-gated sections instead of one flat list:
+
+| Section | Links | Who sees it |
+|---|---|---|
+| Core | Dashboard | Everyone |
+| Sales CRM | Leads, Pipeline, Companies, Contacts | Admin, sales |
+| Dev & Workspace | Tasks, Projects, Chat, Boards | Everyone |
+| Settings | Automation Rules, Team Directory | Admin |
+
+A developer's sidebar shows only Core and Dev & Workspace - not just because
+there's nothing useful in the other sections, but because the backend
+rejects those requests outright (`403`). The routes are also role-gated in
 `App.jsx`, so a developer hitting one of those URLs directly gets redirected
-to the dashboard instead of landing on a raw error banner.
+to the dashboard instead of landing on a raw error banner. Section headers
+themselves disappear along with their links, so a developer's sidebar never
+shows an empty "Sales CRM" heading with nothing under it.
 
-The header also has a **search box** (companies/contacts/deals,
+The sidebar defaults to 240px with icon + label; a **Collapse** button at
+the bottom shrinks it to a 64px icon-only rail (labels fade out, the active
+indicator moves flush to the edge) and remembers the choice per browser in
+`localStorage` (`dominare_sidebar_collapsed`) - `src/components/icons.jsx`
+holds the small inline-SVG icon set, one more dependency-free addition
+rather than pulling in an icon library for a dozen glyphs.
+
+The top header is deliberately minimal now that navigation lives in the
+sidebar: a **search box** (companies/contacts/deals,
 `src/components/SearchBar.jsx`) - admin/sales only, since it only searches
-data a developer can't see anyway - and a **notification bell**
-(`src/components/NotificationBell.jsx`, polls every 30s, every role) on
-every authenticated page.
+data a developer can't see anyway - with a `⌘K`/`Ctrl K` hint that's also a
+real shortcut (a document-level listener focuses the input from anywhere on
+the page), the theme toggle, a **notification bell**
+(`src/components/NotificationBell.jsx`, polls every 30s, every role), and
+the user's name/role with a log-out button.
 
-Role-based UI (which nav links, routes, and write controls show) mirrors the
-backend's `src/lib/permissions.js` - the backend is still the source of
-truth and re-checks every request, the frontend just avoids showing or
-routing to controls a given role can't use.
+Role-based UI (which sidebar sections, routes, and write controls show)
+mirrors the backend's `src/lib/permissions.js` - the backend is still the
+source of truth and re-checks every request, the frontend just avoids
+showing or routing to controls a given role can't use.
 
 ## Theme
 
