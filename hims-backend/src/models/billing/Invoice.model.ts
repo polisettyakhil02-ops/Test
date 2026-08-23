@@ -2,6 +2,7 @@ import { Schema, model, type Model, type HydratedDocument, type Types } from "mo
 import { InvoiceStatus, PayerType } from "../../types/common.types.js";
 
 export interface InvoiceLineItem {
+  _id?: Types.ObjectId;
   tariffServiceId: Types.ObjectId;
   serviceCode: string;
   description: string;

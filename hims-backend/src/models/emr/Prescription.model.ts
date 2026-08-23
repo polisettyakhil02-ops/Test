@@ -11,6 +11,7 @@ import { DrugAllergy } from "./DrugAllergy.model.js";
  * was already ordered.
  */
 export interface PrescriptionItem {
+  _id: Types.ObjectId;
   drugId: Types.ObjectId;
   drugName: string; // denormalized snapshot
   doseValue: number;
@@ -115,6 +116,11 @@ PrescriptionSchema.pre("validate", async function preValidate(next) {
     drugId: { $in: drugIds },
   })
     .select("drugId allergen")
+    // Threads through the session `save({ session })` associated with this
+    // document (e.g. from within PharmacyService's transaction) so the
+    // check reads with the same snapshot rather than a separate, unrelated
+    // implicit session.
+    .session(this.$session())
     .lean();
 
   if (activeAllergies.length > 0) {

@@ -30,6 +30,8 @@ export interface AuditLogAttrs {
   requestMethod?: string;
   requestPath?: string;
   statusCode?: number;
+  /** Denormalized from statusCode at write time so log readers/reports never need to re-derive it. */
+  status: "SUCCESS" | "FAILED";
   reasonDenied?: string; // populated for PERMISSION_DENIED
   occurredAt: Date;
 }
@@ -59,6 +61,7 @@ const AuditLogSchema = new Schema<AuditLogAttrs>(
     requestMethod: { type: String },
     requestPath: { type: String },
     statusCode: { type: Number },
+    status: { type: String, required: true, enum: ["SUCCESS", "FAILED"], index: true },
     reasonDenied: { type: String },
     occurredAt: { type: Date, required: true, default: () => new Date(), index: true },
   },

@@ -35,25 +35,23 @@ hims-backend/
 │   │   ├── admin/               # Department, Role, User, StaffProfile
 │   │   ├── audit/               # AuditLog (immutable), RefreshToken
 │   │   └── index.ts             # barrel export
-│   ├── middleware/                                                     [Step 2]
-│   │   ├── authenticate.ts     # JWT verification from HTTP-only cookie
-│   │   ├── authorize.ts        # RBAC: requires(resource, action)
-│   │   ├── auditInterceptor.ts # writes AuditLog on every mutating/read request
-│   │   └── errorHandler.ts
-│   ├── services/                                                       [Step 2]
-│   │   ├── auth/                # login, refresh-token rotation, logout
-│   │   ├── billing/             # BillingService — ACID invoice + payment posting
-│   │   ├── pharmacy/            # DispensationEngine — ACID stock deduction
-│   │   ├── ipd/                 # BedADTEngine — ACID admit/transfer/discharge
-│   │   └── ...                  # one service module per domain
-│   ├── repositories/                                                   [Step 2/3]
+│   ├── middlewares/                                                    ✅ Step 2 (partial)
+│   │   ├── auth.middleware.ts   # JWT verify: HTTP-only cookie, Bearer fallback  ✅ Step 2
+│   │   ├── rbac.middleware.ts   # authorizeRoles(...roles) + authorizePermission(resource, action)  ✅ Step 2
+│   │   ├── audit.interceptor.ts # writes AuditLog after every response is sent  ✅ Step 2
+│   │   └── errorHandler.ts                                             [Step 3]
+│   ├── services/                                                       ✅ Step 2 (partial)
+│   │   ├── pharmacy.service.ts  # PharmacyService.dispenseMedication — ACID stock deduction  ✅ Step 2
+│   │   ├── adt.service.ts       # ADTService.admitPatient — ACID bed claim + admission  ✅ Step 2
+│   │   └── ...                  # auth/login/refresh, billing, lab, OT services         [Step 2 cont'd]
+│   ├── repositories/                                                   [Step 3]
 │   │   └── ...                  # thin data-access layer wrapping models
 │   ├── controllers/                                                    [Step 3]
 │   │   └── ...                  # one controller per domain, calls services
 │   ├── routes/                                                         [Step 3]
 │   │   └── ...                  # Express routers, mounted in app.ts
-│   ├── utils/                                                          [Step 2+]
-│   ├── app.ts                                                          [Step 2]
+│   ├── utils/                    # errors, objectId, money, sequenceGenerator, jwt, assert  ✅ Step 2
+│   ├── app.ts                                                          [Step 3]
 │   └── server.ts               # bootstrap: security middleware, health checks ✅ Step 1 (minimal)
 ├── test/
 ├── package.json                                                        ✅ Step 1
@@ -103,15 +101,26 @@ docker/                                                                 [Step 5]
 Every write that spans more than one collection with a financial,
 inventory, or bed-occupancy consequence **must** go through
 `withTransaction()` in `hims-backend/src/config/database.ts` — never a
-raw `mongoose.startSession()`. This keeps retry-on-write-conflict and
-majority write-concern behavior identical across the Billing Service, the
-Pharmacy Stock Dispensation Engine, and the Bed ADT Engine landing in
-Step 2.
+raw `mongoose.startSession()`. `PharmacyService.dispenseMedication` and
+`ADTService.admitPatient` (Step 2) are the first two services built on
+it; `BillingService` and the remaining domain services follow the same
+pattern as they're added.
+
+## Step 2 deliverables (this checkpoint)
+
+- **`auth.middleware.ts`** — `authenticate`/`authenticateOptional`: verifies the access JWT (HTTP-only cookie first, `Authorization: Bearer` fallback), re-fetches the `User` on every request so a deactivated/locked account or role change takes effect without waiting out the token TTL, and attaches a minimal `req.user` (never the full Mongoose document).
+- **`rbac.middleware.ts`** — `authorizeRoles(...roles)` (static allowlist, as specified) plus `authorizePermission(resource, action)` (checks the editable `Role.permissions` matrix from Step 1, Redis-cached with a 300s TTL) for the "granular RBAC" requirement from the system scope.
+- **`audit.interceptor.ts`** — `res.on("finish")`-based, fire-and-forget `AuditLog` writes after every response; derives `action` from the HTTP method (`GET`→READ, `POST`→CREATE, `PUT`/`PATCH`→UPDATE, `DELETE`→DELETE, a 403 anywhere→PERMISSION_DENIED), `resourceType` from an explicit override or the URL path, and `targetResource` from `:id`-shaped route params. Required adding an explicit `status: "SUCCESS" | "FAILED"` field to `AuditLog` (Step 1 only stored `statusCode`).
+- **`pharmacy.service.ts`** — `PharmacyService.dispenseMedication`: FEFO-allocates the requested quantity across `DrugBatch` records (conditionally decrementing each with `findOneAndUpdate` as defense in depth alongside transaction snapshot isolation), appends immutable `StockTransaction` ledger rows, posts a priced `InvoiceLineItem` to the patient's DRAFT invoice (creating one if none exists, priced off `TariffMaster`), updates the `Prescription` item/overall status, and writes a `Dispensation` receipt — one `withTransaction` call, all-or-nothing.
+- **`adt.service.ts`** — `ADTService.admitPatient`: claims a bed with a single conditional `findOneAndUpdate({ status: VACANT })` (the entire double-booking guard), creates the `Admission` document seeded with its first ADT movement-history entry, and links the bed back to the admission — one `withTransaction` call.
+- **`utils/`** — `errors.ts` (typed `AppError` hierarchy every service throws), `objectId.ts`, `money.ts` (currency rounding), `sequenceGenerator.ts` (Redis-backed document numbers, e.g. `INV-2026-000042`), `assert.ts` (`firstOrThrow` for `Model.create()` results under `noUncheckedIndexedAccess`), `jwt.ts` (access/refresh sign+verify).
+
+Not yet built: `errorHandler.ts`, `app.ts`, login/refresh-token-rotation service, repositories, controllers, routes — all Step 3.
 
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
-- [ ] **Step 2** — Auth, RBAC middleware, audit interceptor, ACID-wrapped core services
+- [x] **Step 2 (partial)** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID). Remaining: login/refresh-token-rotation service, Billing Service, error handler.
 - [ ] **Step 3** — API controllers/routes for OPD, IPD, EMR, Pharmacy, LIMS, Billing
 - [ ] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI
 - [ ] **Step 5** — Docker, Nginx, production hosting guide
