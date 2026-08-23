@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+#
+# Multi-stage build for hims-frontend: Vite build under Node, served by an
+# unprivileged Nginx. Build with the repo root as context (see
+# docker-compose.prod.yml: `context: ..`, `dockerfile: docker/Dockerfile.client`).
+
+########################################
+# 1. build — compile the Vite/React app -> dist/
+########################################
+FROM node:20-alpine AS build
+WORKDIR /app
+
+COPY hims-frontend/package.json hims-frontend/package-lock.json ./
+RUN npm ci
+
+COPY hims-frontend/ ./
+
+# Baked into the built JS bundle at build time (Vite inlines import.meta.env.*
+# at build, not at container start) — override per-environment by passing
+# --build-arg, not by changing the running container.
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
+RUN npm run build
+
+########################################
+# 2. production — static files behind Nginx, non-root
+########################################
+FROM nginx:1.27-alpine AS production
+
+COPY docker/nginx/client.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# The official nginx image already defines an unprivileged `nginx` system
+# user (used for worker processes even when the master runs as root by
+# default); running the master as that same user too just needs it to own
+# the paths it writes to, and a listen port above 1024 (see client.conf,
+# 8080) since it can no longer bind privileged ports.
+RUN touch /var/run/nginx.pid && \
+    chown -R nginx:nginx /var/run/nginx.pid /var/cache/nginx /usr/share/nginx/html /etc/nginx/conf.d
+
+USER nginx
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1:8080/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

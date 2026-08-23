@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-4)
+# HIMS Platform — Architecture Blueprint (Steps 1-5)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -8,7 +8,8 @@ top-level TypeScript/MERN system:
 ```
 hims-backend/     Express + TypeScript API, MongoDB replica set, Redis
 hims-frontend/    React (Vite/TS) client
-docker/           Nginx config, compose files, deployment guide        [Step 5]
+docker/           Dockerfiles, Nginx config, docker-compose.prod.yml
+DEPLOYMENT.md     Production hosting guide (root of the repo)
 ```
 
 ## Target full folder hierarchy
@@ -93,12 +94,17 @@ hims-frontend/                                                          ✅ Step
 ├── vite.config.ts               # /api dev-proxy to hims-backend
 └── tailwind.config.ts
 
-docker/                                                                 [Step 5]
-├── backend.Dockerfile          # multi-stage build
-├── frontend.Dockerfile         # multi-stage build
-├── nginx/
-│   └── nginx.conf              # reverse proxy, TLS, CSP/CORS/rate-limit headers
-└── docker-compose.prod.yml     # mongo replica set (3 nodes), redis, backend, frontend, nginx
+docker/                                                                 ✅ Step 5
+├── Dockerfile.server            # hims-backend: deps -> build -> non-root production stage
+├── Dockerfile.client            # hims-frontend: Vite build -> unprivileged Nginx (port 8080)
+├── docker-compose.prod.yml      # mongo1-3 (replica set), mongo-setup, redis, api, web, nginx-proxy, certbot
+├── .env.example                 # every var the compose file interpolates, with generation instructions
+├── mongo/init-replica.sh        # idempotent rs.initiate() + root/scoped-app user bootstrap
+└── nginx/
+    ├── default.conf             # edge reverse proxy: TLS, security headers, /api/auth rate limiting
+    └── client.conf              # baked into Dockerfile.client — internal static-file + SPA-fallback Nginx
+
+DEPLOYMENT.md                                                          ✅ Step 5
 ```
 
 ## Domain → collection map (Step 1 deliverable)
@@ -169,10 +175,21 @@ New `hims-frontend/` client — React 18, Vite, TypeScript (strict, `noUnchecked
 
 None of the four pages requested are stubs — every hook makes a real, correctly-typed call to either a real Step 3 endpoint or one of the three gaps above, so each starts working the moment its endpoint lands.
 
+## Step 5 deliverables (this checkpoint)
+
+Full production deployment story for a single Linux host — see
+`DEPLOYMENT.md` for the runnable walkthrough; summary here:
+
+- **`docker/Dockerfile.server`** / **`docker/Dockerfile.client`** — multi-stage builds (deps/build/production for the API; Vite build → Nginx for the client), both running their application process as a dedicated non-root user, both with a `HEALTHCHECK`.
+- **`docker/docker-compose.prod.yml`** — `mongo1`/`mongo2`/`mongo3` (a real 3-node replica set, `internal: true` network, `--keyFile` cluster auth), `mongo-setup` (transient, idempotent `rs.initiate()` + user bootstrap), `redis` (password-protected), `api`, `web`, `nginx-proxy` (the only container with published ports), and a profile-gated `certbot`. Validated with `docker compose config` against every var in `.env.example` populated — parses clean, including the `network_mode: service:mongo1` + `depends_on: condition: service_healthy/service_completed_successfully` combinations.
+- **`docker/mongo/init-replica.sh`** — the genuinely tricky part: MongoDB's "localhost exception" (the only way to bootstrap the first admin user once `--keyFile` enforces auth from process start) applies strictly to true loopback connections, which a sibling container talking over the bridge network is not. Solved via `network_mode: "service:mongo1"` on `mongo-setup` rather than papering over it; the script is idempotent so re-running the stack after first boot is a no-op. Creates a scoped `readWrite`-only application user (least privilege), not just a root user.
+- **`docker/nginx/default.conf`** — TLS termination, HSTS/X-Frame-Options/CSP/etc. security headers, a stricter `limit_req` zone on `/api/auth/` specifically (brute-force/credential-stuffing mitigation) than the rest of `/api/`, and WebSocket upgrade passthrough wired up (inert until hims-backend opens a WS endpoint, e.g. for a live OPD queue display — harmless to leave ready).
+- **`DEPLOYMENT.md`** — env var reference table, exact `apt`-repository Docker install for Ubuntu 24.04, `ufw` firewall rules, the keyfile-generation + permission steps, the full Let's-Encrypt bootstrap (dummy self-signed cert so Nginx can start → real cert via the webroot ACME challenge → reload) since a fresh domain has no cert yet and Nginx won't start pointed at files that don't exist, and a systemd timer for renewal.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
 - [x] **Step 2** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID)
 - [x] **Step 3 (partial)** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: login/refresh-token-rotation service, LIMS + OT controllers/routes.
 - [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. Blocked end-to-end only by the auth routes and two smaller gaps listed above.
-- [ ] **Step 5** — Docker, Nginx, production hosting guide
+- [x] **Step 5** — Docker, Nginx, production hosting guide. The stack builds and deploys today; going live still needs the Step 3 auth routes (`docker compose up` will happily run a HIMS instance nobody can log into until then).

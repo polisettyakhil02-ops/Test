@@ -1,0 +1,20 @@
+# Applies to every image built with build.context: ".." (the repo root) in
+# docker-compose.prod.yml — keeps the build context small and makes sure
+# no secrets or local artifacts ever land inside an image layer.
+
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/.DS_Store
+
+.git
+.github
+
+# The unrelated Ask-the-ERP app isn't part of the HIMS image builds.
+backend
+frontend
+
+docker/secrets
