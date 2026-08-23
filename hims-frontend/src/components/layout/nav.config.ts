@@ -52,4 +52,10 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "₹",
     roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.BILLING_EXECUTIVE],
   },
+  {
+    label: "Admin Console",
+    path: "/admin",
+    icon: "⚙",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN],
+  },
 ];

@@ -7,6 +7,11 @@ import { BedManager } from "@/pages/ipd/BedManager";
 import { DoctorDesk } from "@/pages/emr/DoctorDesk";
 import { DispensationQueue } from "@/pages/pharmacy/DispensationQueue";
 import { InvoiceView } from "@/pages/billing/InvoiceView";
+import { AdminLayout } from "@/pages/admin/AdminLayout";
+import { StaffDirectory } from "@/pages/admin/StaffDirectory";
+import { PatientDirectory } from "@/pages/admin/PatientDirectory";
+import { InfrastructureMaster } from "@/pages/admin/InfrastructureMaster";
+import { AuditInspector } from "@/pages/admin/AuditInspector";
 import { SystemRole } from "@/types/common.types";
 
 const IPD_ROLES = [
@@ -20,6 +25,7 @@ const IPD_ROLES = [
 const EMR_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.DOCTOR];
 const PHARMACY_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.PHARMACIST];
 const BILLING_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.BILLING_EXECUTIVE];
+const ADMIN_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN];
 
 export default function App() {
   return (
@@ -49,6 +55,18 @@ export default function App() {
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Route>
+
+      {/* Master Admin Control Center — deliberately outside DashboardLayout; AdminLayout renders its own full-screen shell. */}
+      <Route element={<ProtectedRoute roles={ADMIN_ROLES} />}>
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<Navigate to="/admin/staff" replace />} />
+          <Route path="staff" element={<StaffDirectory />} />
+          <Route path="patients" element={<PatientDirectory />} />
+          <Route path="wards" element={<InfrastructureMaster />} />
+          <Route path="audit-logs" element={<AuditInspector />} />
+          <Route path="*" element={<Navigate to="/admin/staff" replace />} />
         </Route>
       </Route>
     </Routes>

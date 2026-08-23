@@ -4,6 +4,7 @@ import ipdRoutes from "./ipd.routes.js";
 import emrRoutes from "./emr.routes.js";
 import pharmacyRoutes from "./pharmacy.routes.js";
 import billingRoutes from "./billing.routes.js";
+import adminRoutes from "./admin.routes.js";
 
 /**
  * Main API router, mounted at "/api" by `app.ts`. `patientRoutes` spans
@@ -18,5 +19,6 @@ router.use("/ipd", ipdRoutes);
 router.use("/emr", emrRoutes);
 router.use("/pharmacy", pharmacyRoutes);
 router.use("/billing", billingRoutes);
+router.use("/admin", adminRoutes);
 
 export default router;

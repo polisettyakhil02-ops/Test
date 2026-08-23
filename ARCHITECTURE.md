@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-5)
+# HIMS Platform — Architecture Blueprint (Steps 1-6)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -186,6 +186,31 @@ Full production deployment story for a single Linux host — see
 - **`docker/nginx/default.conf`** — TLS termination, HSTS/X-Frame-Options/CSP/etc. security headers, a stricter `limit_req` zone on `/api/auth/` specifically (brute-force/credential-stuffing mitigation) than the rest of `/api/`, and WebSocket upgrade passthrough wired up (inert until hims-backend opens a WS endpoint, e.g. for a live OPD queue display — harmless to leave ready).
 - **`DEPLOYMENT.md`** — env var reference table, exact `apt`-repository Docker install for Ubuntu 24.04, `ufw` firewall rules, the keyfile-generation + permission steps, the full Let's-Encrypt bootstrap (dummy self-signed cert so Nginx can start → real cert via the webroot ACME challenge → reload) since a fresh domain has no cert yet and Nginx won't start pointed at files that don't exist, and a systemd timer for renewal.
 
+## Step 6 deliverables (this checkpoint)
+
+Master Admin Control Center — a "God-mode" directory and CRUD surface over
+Staff, Patients, Wards/Beds, and the Audit Log, gated to
+`SUPER_ADMIN`/`HOSPITAL_ADMIN` only, on both tiers.
+
+**Backend — `hims-backend/src/{services,controllers,routes}/admin.*`:**
+
+- **`admin.service.ts`** — the business logic. Staff CRUD works against `User` joined (via aggregation `$lookup` + `$facet`, so pagination totals stay correct under a `departmentId` filter) to whichever of `StaffProfile`/`Doctor` the user's roles imply; password reset issues a fresh random temporary password and re-hashes it, never returns the hash. Patient directory is the same join pattern, plus **`mergePatients()`**: inside one `ClientSession`/transaction, every one of the 19 models in the system carrying a `patientId` (found via `grep -rl patientId src/models`, not guessed) gets `updateMany({patientId: dup}, {$set:{patientId: primary}})`, run sequentially — a single MongoDB session cannot multiplex concurrent operations — then the duplicate is soft-marked via `Patient`'s pre-existing `mergedIntoPatientId` field (built in Step 1 for exactly this), never hard-deleted. Ward/Bed management bridges to Step 1's `TariffMaster` for the "base rent per ward type" concern, since `Ward` itself carries no price field by design; bed status transitions exclude `OCCUPIED` (that state only comes from the ADT flow). Sort-field allowlists on every list function prevent arbitrary-field-sort injection.
+- **`admin.controller.ts`** — zod `.strict()` request validation on every endpoint (rejects unexpected fields outright); shared `parsePagination()`/`parseSort()` helpers. Both "delete" endpoints (`DELETE /api/admin/users/:id`, `DELETE /api/admin/patients/:id`) are documented soft-deactivations, never hard deletes — the system has too many foreign-key references (createdBy, prescribedBy, historical clinical/audit records) and healthcare record-retention obligations for a real delete to be safe.
+- **`admin.routes.ts`** — mounted at `/api/admin`; `router.use(protect, authorizeRoles(SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN))` gates the entire router once, then each route still runs `auditLogger(...)` so every admin action lands in the same immutable audit trail it can itself inspect.
+- Endpoints: `GET/POST/PUT/PATCH/DELETE /api/admin/users(:id)`, `.../users/:id/reset-password`, `GET/PUT/DELETE /api/admin/patients(:id)`, `POST /api/admin/patients/merge`, `GET/POST/PUT /api/admin/wards(:id)`, `PATCH /api/admin/beds/:id/status`, `GET /api/admin/audit-logs` (filterable by `userId`, `actionType` — now `AuditAction | AuditAction[]` with `$in`, matching the "every WRITE action by X" spec example — `targetResource`, date range).
+
+**Frontend — `hims-frontend/src/{pages/admin,hooks/useAdmin.ts,components/admin}`:**
+
+- **`components/admin/DataTable.tsx`** — a generic, fully server-driven (`manualPagination`/`manualSorting`) TanStack Table v8 wrapper reused by all three directories, so search/filter/sort/pagination scale to a directory with thousands of rows instead of shipping the whole collection to the browser for client-side fuzzy search.
+- **`pages/admin/AdminLayout.tsx`** — a dark-slate shell deliberately distinct from the clinical `DashboardLayout` (own sidebar, own header, "Exit to main dashboard" link) so admins always have a clear visual signal they're operating on raw system records; mounted as a sibling to the main app shell in `App.tsx`, not nested inside it.
+- **`pages/admin/StaffDirectory.tsx`** + **`StaffEditDrawer.tsx`** — searchable/filterable/sortable staff table, slide-over create/edit form with conditional validation (doctor-only fields vs. general staff fields via zod `superRefine`), inline deactivate toggle, one-click password reset.
+- **`pages/admin/PatientDirectory.tsx`** + **`PatientEditDrawer.tsx`** + **`MergePatientsModal.tsx`** — global patient search/edit (full demographics, including gender/blood group), deactivate, and a two-patient-lookup merge flow (built against the admin's own `/api/admin/patients` search rather than the clinical patient-lookup endpoint, which `HOSPITAL_ADMIN` isn't role-granted) showing a per-collection `recordsReassigned` count on success.
+- **`pages/admin/InfrastructureMaster.tsx`** + **`WardEditModal.tsx`** — card grid of wards with live occupancy badges; a modal edits `baseRent`/`totalBedCapacity` and each bed's status individually (including "Under Maintenance"), backed by the Ward↔TariffMaster bridge in the service layer.
+- **`pages/admin/AuditInspector.tsx`** — immutable audit feed polling every 15s; date range, a chip-toggle multi-select action-type filter, target-resource search, result filter, and a "performed by" dropdown sourced from the live staff directory; each row expands into request method/path/status/IP/user-agent and a JSON `fieldChanges` diff.
+- **`hooks/useAdmin.ts`** — one TanStack Query hook per endpoint above (`useStaffDirectory`, `useUpdateUser`, `useResetPassword`, `usePatientDirectory`, `useMergePatients`, `useAdminWards`, `useUpdateWard`, `useUpdateBedStatus`, `useAuditLogs`, etc.), all list hooks using `placeholderData: keepPreviousData` so pagination/sort/filter changes don't flash a loading state.
+
+Both `hims-backend` (`tsc --noEmit`) and `hims-frontend` (`tsc -b && vite build`) verify clean with these changes.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
@@ -193,3 +218,4 @@ Full production deployment story for a single Linux host — see
 - [x] **Step 3 (partial)** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: login/refresh-token-rotation service, LIMS + OT controllers/routes.
 - [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. Blocked end-to-end only by the auth routes and two smaller gaps listed above.
 - [x] **Step 5** — Docker, Nginx, production hosting guide. The stack builds and deploys today; going live still needs the Step 3 auth routes (`docker compose up` will happily run a HIMS instance nobody can log into until then).
+- [x] **Step 6** — Master Admin Control Center: global Staff/Patient/Ward/Audit-Log directory and CRUD, gated to `SUPER_ADMIN`/`HOSPITAL_ADMIN`, including ACID patient-record merging.

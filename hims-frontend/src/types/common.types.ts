@@ -155,10 +155,35 @@ export const PaymentMode = {
 } as const;
 export type PaymentMode = (typeof PaymentMode)[keyof typeof PaymentMode];
 
+export const AuditAction = {
+  CREATE: "CREATE",
+  READ: "READ",
+  UPDATE: "UPDATE",
+  DELETE: "DELETE",
+  LOGIN: "LOGIN",
+  LOGOUT: "LOGOUT",
+  LOGIN_FAILED: "LOGIN_FAILED",
+  EXPORT: "EXPORT",
+  PRINT: "PRINT",
+  PERMISSION_DENIED: "PERMISSION_DENIED",
+} as const;
+export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
+
 /** Every API response's envelope shape (see hims-backend controllers: `res.json({ data: ... })`). */
 export interface ApiEnvelope<T> {
   data: T;
   message?: string;
+}
+
+/** The envelope shape for every paginated admin list endpoint (`res.json({ data, meta })`). */
+export interface PaginatedEnvelope<T> {
+  data: T[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    pageCount: number;
+  };
 }
 
 /** Shape of an error response body from hims-backend's errorHandler middleware. */
