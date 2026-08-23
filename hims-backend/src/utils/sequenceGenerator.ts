@@ -21,3 +21,6 @@ export async function generateSequenceNumber(
 export const generateInvoiceNumber = (): Promise<string> => generateSequenceNumber("INV", "invoice");
 export const generateDispensationNumber = (): Promise<string> => generateSequenceNumber("DISP", "dispensation");
 export const generateAdmissionNumber = (): Promise<string> => generateSequenceNumber("IPD", "admission");
+export const generateVisitNumber = (): Promise<string> => generateSequenceNumber("OPD", "opdVisit");
+export const generatePrescriptionNumber = (): Promise<string> => generateSequenceNumber("RX", "prescription");
+export const generateReceiptNumber = (): Promise<string> => generateSequenceNumber("RCPT", "payment");

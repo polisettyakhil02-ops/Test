@@ -65,11 +65,60 @@ export function auditInterceptor(resourceTypeOverride?: string) {
   };
 }
 
-async function writeAuditLog(req: Request, res: Response, resourceTypeOverride?: string): Promise<void> {
+/** Coarse action bucket for `auditLogger`, resolved to a concrete `AuditAction` in `writeAuditLog`. */
+export type AuditActionBucket = "READ" | "WRITE" | "DELETE";
+
+function bucketToAction(bucket: AuditActionBucket, method: string): AuditAction {
+  switch (bucket) {
+    case "READ":
+      return AuditAction.READ;
+    case "DELETE":
+      return AuditAction.DELETE;
+    case "WRITE":
+      // A WRITE-bucketed route is expected to be POST/PUT/PATCH, so
+      // methodToAction still resolves it to the precise CREATE/UPDATE —
+      // the bucket exists to make call sites read as "this route writes",
+      // not to lose that precision.
+      return methodToAction(method);
+  }
+}
+
+/**
+ * Explicit-action variant of `auditInterceptor`, for mounting per-route
+ * with the action stated up front — `auditLogger("WRITE")`,
+ * `auditLogger("READ")` — rather than relying on the HTTP method to imply
+ * it. Same fire-and-forget `res.on("finish")` write underneath.
+ */
+export function auditLogger(bucket: AuditActionBucket, resourceTypeOverride?: string) {
+  return function auditLoggerMiddleware(req: Request, res: Response, next: NextFunction): void {
+    if (AUDIT_EXCLUDED_PATHS.has(req.path)) {
+      next();
+      return;
+    }
+
+    res.on("finish", () => {
+      void writeAuditLog(req, res, resourceTypeOverride, bucket);
+    });
+
+    next();
+  };
+}
+
+async function writeAuditLog(
+  req: Request,
+  res: Response,
+  resourceTypeOverride?: string,
+  bucket?: AuditActionBucket,
+): Promise<void> {
   try {
     const statusCode = res.statusCode;
     const status: "SUCCESS" | "FAILED" = statusCode < 400 ? "SUCCESS" : "FAILED";
-    const action = statusCode === 403 ? AuditAction.PERMISSION_DENIED : methodToAction(req.method);
+    const action =
+      statusCode === 403
+        ? AuditAction.PERMISSION_DENIED
+        : bucket
+          ? bucketToAction(bucket, req.method)
+          : methodToAction(req.method);
 
     await AuditLog.create({
       action,

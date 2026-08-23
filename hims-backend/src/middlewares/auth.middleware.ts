@@ -119,3 +119,6 @@ export async function authenticateOptional(req: Request, _res: Response, next: N
 
   next();
 }
+
+/** Alias matching the naming used in route wiring elsewhere in this codebase ("protect this route"). Identical to `authenticate`. */
+export const protect = authenticate;

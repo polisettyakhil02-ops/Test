@@ -21,7 +21,12 @@ export function authorizeRoles(...allowedRoles: SystemRole[]) {
       return;
     }
 
-    const isAuthorized = user.roles.some((role) => allowedRoles.includes(role));
+    // SUPER_ADMIN always passes: it is the platform's break-glass role and
+    // must never be locked out by an allowlist a route author forgot to
+    // extend, so it bypasses both the static allowlist and the permission
+    // matrix below rather than needing to be enumerated on every route.
+    const isAuthorized =
+      user.roles.includes(SystemRole.SUPER_ADMIN) || user.roles.some((role) => allowedRoles.includes(role));
     if (!isAuthorized) {
       res.status(403).json({
         error: "FORBIDDEN",
@@ -67,6 +72,9 @@ export async function invalidatePermissionCache(role: SystemRole): Promise<void>
 }
 
 async function hasPermission(roles: SystemRole[], resource: string, action: PermissionAction): Promise<boolean> {
+  if (roles.includes(SystemRole.SUPER_ADMIN)) {
+    return true;
+  }
   for (const role of roles) {
     const grants = await getPermissionGrants(role);
     const grant = grants.find((g) => g.resource === resource);

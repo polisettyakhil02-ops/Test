@@ -36,23 +36,35 @@ hims-backend/
 │   │   ├── audit/               # AuditLog (immutable), RefreshToken
 │   │   └── index.ts             # barrel export
 │   ├── middlewares/                                                    ✅ Step 2 (partial)
-│   │   ├── auth.middleware.ts   # JWT verify: HTTP-only cookie, Bearer fallback  ✅ Step 2
-│   │   ├── rbac.middleware.ts   # authorizeRoles(...roles) + authorizePermission(resource, action)  ✅ Step 2
-│   │   ├── audit.interceptor.ts # writes AuditLog after every response is sent  ✅ Step 2
-│   │   └── errorHandler.ts                                             [Step 3]
-│   ├── services/                                                       ✅ Step 2 (partial)
+│   │   ├── auth.middleware.ts   # authenticate/protect: HTTP-only cookie, Bearer fallback  ✅ Step 2
+│   │   ├── rbac.middleware.ts   # authorizeRoles(...roles) + authorizePermission(resource, action), SUPER_ADMIN bypass  ✅ Step 2/3
+│   │   ├── audit.interceptor.ts # auditInterceptor() (auto) + auditLogger(bucket) (explicit) writers  ✅ Step 2/3
+│   │   └── errorHandler.ts      # maps AppError/ZodError/Mongoose errors/dup-key to HTTP responses  ✅ Step 3
+│   ├── services/                                                       ✅ Step 2/3 (partial)
 │   │   ├── pharmacy.service.ts  # PharmacyService.dispenseMedication — ACID stock deduction  ✅ Step 2
 │   │   ├── adt.service.ts       # ADTService.admitPatient — ACID bed claim + admission  ✅ Step 2
-│   │   └── ...                  # auth/login/refresh, billing, lab, OT services         [Step 2 cont'd]
-│   ├── repositories/                                                   [Step 3]
-│   │   └── ...                  # thin data-access layer wrapping models
-│   ├── controllers/                                                    [Step 3]
-│   │   └── ...                  # one controller per domain, calls services
-│   ├── routes/                                                         [Step 3]
-│   │   └── ...                  # Express routers, mounted in app.ts
-│   ├── utils/                    # errors, objectId, money, sequenceGenerator, jwt, assert  ✅ Step 2
-│   ├── app.ts                                                          [Step 3]
-│   └── server.ts               # bootstrap: security middleware, health checks ✅ Step 1 (minimal)
+│   │   ├── opd.service.ts       # OPDService.bookAppointment — ACID queue token + visit  ✅ Step 3
+│   │   ├── emr.service.ts       # EMRService: clinical note+diagnoses, prescriptions, timeline  ✅ Step 3
+│   │   ├── billing.service.ts   # BillingService.payInvoice — ACID payment + invoice update  ✅ Step 3
+│   │   └── ...                  # auth/login/refresh, lab, OT services                  [Step 2/3 cont'd]
+│   ├── repositories/                                                   [not yet needed]
+│   │   └── ...                  # thin data-access layer wrapping models, if/when a domain needs it
+│   ├── controllers/                                                    ✅ Step 3
+│   │   ├── patient.controller.ts   # register, lookup by UHID, book appointment
+│   │   ├── ipd.controller.ts       # admit, wards/beds visual map
+│   │   ├── emr.controller.ts       # clinical notes, prescriptions, timeline
+│   │   ├── pharmacy.controller.ts  # pending prescriptions, dispense
+│   │   └── billing.controller.ts   # active invoice, pay invoice
+│   ├── routes/                                                         ✅ Step 3
+│   │   ├── index.ts             # mounts every domain router under /api
+│   │   ├── patient.routes.ts    # /patients, /patients/:uhid, /appointments (see file header)
+│   │   ├── ipd.routes.ts        # /ipd/admit, /ipd/wards
+│   │   ├── emr.routes.ts        # /emr/:patientId/{notes,prescriptions,timeline}
+│   │   ├── pharmacy.routes.ts   # /pharmacy/prescriptions/pending, /pharmacy/dispense
+│   │   └── billing.routes.ts    # /billing/:patientId/active-invoice, /billing/:invoiceId/pay
+│   ├── utils/                    # errors, objectId, money, sequenceGenerator, jwt, assert, validation  ✅ Step 2/3
+│   ├── app.ts                   # createApp(): security middleware + /api mount + error handler  ✅ Step 3
+│   └── server.ts               # bootstrap: connect DB, createApp(), listen             ✅ Step 1/3
 ├── test/
 ├── package.json                                                        ✅ Step 1
 ├── tsconfig.json                                                       ✅ Step 1
@@ -115,12 +127,25 @@ pattern as they're added.
 - **`adt.service.ts`** — `ADTService.admitPatient`: claims a bed with a single conditional `findOneAndUpdate({ status: VACANT })` (the entire double-booking guard), creates the `Admission` document seeded with its first ADT movement-history entry, and links the bed back to the admission — one `withTransaction` call.
 - **`utils/`** — `errors.ts` (typed `AppError` hierarchy every service throws), `objectId.ts`, `money.ts` (currency rounding), `sequenceGenerator.ts` (Redis-backed document numbers, e.g. `INV-2026-000042`), `assert.ts` (`firstOrThrow` for `Model.create()` results under `noUncheckedIndexedAccess`), `jwt.ts` (access/refresh sign+verify).
 
-Not yet built: `errorHandler.ts`, `app.ts`, login/refresh-token-rotation service, repositories, controllers, routes — all Step 3.
+## Step 3 deliverables (this checkpoint)
+
+- **`app.ts`** / **`server.ts`** — split so the configured Express app (`createApp()`) can exist independently of opening a listening socket; `/api` mounts the main router, `notFoundHandler`/`errorHandler` are the last two middlewares registered.
+- **`middlewares/errorHandler.ts`** — every controller below calls `next(err)` on failure rather than shaping its own response; this is the one place that maps `AppError` → its `statusCode`/`code`, plus `ZodError`, Mongoose `ValidationError`/`CastError`, and Mongo duplicate-key (11000) errors, to an HTTP response.
+- **`middlewares/audit.interceptor.ts`** gained `auditLogger(bucket, resourceTypeOverride?)` — an explicit-action-bucket ("READ"/"WRITE"/"DELETE") variant of Step 2's method-inferring `auditInterceptor()`, used on every route below. **`middlewares/rbac.middleware.ts`** and **`auth.middleware.ts`** gained a `SUPER_ADMIN` bypass and a `protect` alias for `authenticate`, respectively.
+- **`opd.service.ts`** — `OPDService.bookAppointment`: issues the next Redis-backed queue token for a doctor's day and creates the linked `OPDVisit` in one transaction.
+- **`emr.service.ts`** — `EMRService.addClinicalNote` (transactional: SOAP note + ICD-10 diagnoses commit together), `addPrescription` (dosage-calculator quantity = `frequencyPerDay × durationDays`, drug lookup, allergy hard-stop via the model's own hook), `getPatientTimeline` (fans out across 7 collections, merges into one chronologically-sorted view).
+- **`billing.service.ts`** — `BillingService.payInvoice`: atomic `Payment` creation + `Invoice.amountPaid/amountDue/status` update; a DRAFT invoice is implicitly finalized on its first payment, which is what locks it from further charges (every charge-posting service only appends to a DRAFT invoice).
+- **5 controller + route pairs**, all wired with `protect` → `authorizeRoles(...)` → `auditLogger(bucket, resourceType)` → handler, exactly matching the endpoint list and role gates in the spec. Every controller validates its request body with an inline Zod schema and calls `next(err)` on failure — no bare try/catch swallowing.
+- **`routes/index.ts`** mounts every domain router under `/api`.
+
+Two deliberate deviations from the literal spec, both to keep the system correct rather than just matching field names: (1) `POST /api/ipd/admit` accepts `wardType` but cross-checks it against the target bed's actual ward category rather than using it to *set* the admission's ward — the bed's own `wardId` is what `ADTService.admitPatient` trusts, since a client-supplied ward could otherwise disagree with the bed being admitted into. (2) EMR write endpoints resolve the acting `doctorId` from the authenticated user's linked `Doctor` profile rather than trusting a `doctorId` in the request body, so one doctor's account can never write a note/prescription under another doctor's name.
+
+Not yet built: login/refresh-token-rotation service, LIMS/OT controllers & routes (not in this checkpoint's scope), repositories layer (not needed yet — no domain's data access has grown complex enough to warrant one).
 
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
-- [x] **Step 2 (partial)** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID). Remaining: login/refresh-token-rotation service, Billing Service, error handler.
-- [ ] **Step 3** — API controllers/routes for OPD, IPD, EMR, Pharmacy, LIMS, Billing
+- [x] **Step 2** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID)
+- [x] **Step 3 (partial)** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: login/refresh-token-rotation service, LIMS + OT controllers/routes.
 - [ ] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI
 - [ ] **Step 5** — Docker, Nginx, production hosting guide
