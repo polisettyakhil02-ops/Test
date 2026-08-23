@@ -2,6 +2,7 @@
   "compilerOptions": {
     "composite": true,
     "outDir": "./node_modules/.tsc-out/node",
+    "tsBuildInfoFile": "./node_modules/.tsc-out/node.tsbuildinfo",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",

@@ -6,6 +6,7 @@
     // by the existing "node_modules/" .gitignore rule) rather than next to
     // the source files.
     "outDir": "./node_modules/.tsc-out/app",
+    "tsBuildInfoFile": "./node_modules/.tsc-out/app.tsbuildinfo",
     "target": "ES2020",
     "useDefineForClassFields": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
