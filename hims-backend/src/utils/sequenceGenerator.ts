@@ -25,3 +25,7 @@ export const generateVisitNumber = (): Promise<string> => generateSequenceNumber
 export const generatePrescriptionNumber = (): Promise<string> => generateSequenceNumber("RX", "prescription");
 export const generateReceiptNumber = (): Promise<string> => generateSequenceNumber("RCPT", "payment");
 export const generateEmployeeCode = (): Promise<string> => generateSequenceNumber("EMP", "staff", 5);
+export const generateLabOrderNumber = (): Promise<string> => generateSequenceNumber("LAB", "labOrder");
+export const generateSpecimenBarcode = (): Promise<string> => generateSequenceNumber("SPEC", "specimen");
+export const generateSurgeryNumber = (): Promise<string> => generateSequenceNumber("OT", "surgery");
+export const generateSterilizationCycleNumber = (): Promise<string> => generateSequenceNumber("STZ", "sterilization");

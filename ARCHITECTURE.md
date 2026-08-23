@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-8)
+# HIMS Platform — Architecture Blueprint (Steps 1-9)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -257,13 +257,34 @@ Closing Core Clinical API Gaps — the two remaining `// BACKEND GAP:` markers l
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
+## Step 9 deliverables (this checkpoint)
+
+LIMS and OT/Cath Lab Implementation — the two domains that had schemas
+since Step 1 but no business logic, controllers, or routes.
+
+**LIMS — `hims-backend/src/services/lims.service.ts`, `controllers/lims.controller.ts`, `routes/lims.routes.ts`:**
+
+- **`LIMSService.createLabOrder`** — creates the `LabOrder`, then accessions one `Specimen` per distinct `specimenType` among the ordered tests (tests sharing a physical draw, e.g. CBC + ESR from one EDTA tube, share one barcode — exactly what `Specimen.model.ts`'s own doc comment describes), linking each test line's `specimenId` back to its specimen — all in one `withTransaction` call, since `LabResult.specimenId` is schema-required and this step doesn't build a separate specimen-collection endpoint. Barcodes are pre-generated at order time (order entry prints the label a phlebotomist then applies), matching real lab-system accessioning workflow.
+- **`LIMSService.submitLabResult`** — the reference-range engine. `selectReferenceRange()` picks the most specific applicable `LabTest.referenceRanges` band for each submitted parameter (sex-specific + age-banded beats sex-specific beats `ALL`-sex + age-banded beats plain `ALL`; a band whose sex or age doesn't match the patient is excluded outright, never merely deprioritized), and `determineFlag()` compares the numeric value against it — critical thresholds checked before the normal band, so a value that's both outside-normal and beyond-critical reports at the more severe flag. Per-parameter flags roll up into `LabResult.overallFlag` by worst-flag-wins severity. One transaction creates the `LabResult` and updates the owning `LabOrder`'s test-line status (and, once every line has a result, the order's own status), so a result can never exist without its order reflecting it. Blocks double-submission against an already-resulted line with a `ConflictError`.
+- **`GET /api/lims/orders`** — the lab technician's worklist: orders not yet fully reported by default (or whichever statuses `?status=` names), sorted by priority (STAT/URGENT/ROUTINE) then age — sorted in-app since MongoDB can't order an enum by severity natively and this is a small, bounded worklist query, same reasoning as the pharmacy dispensation worklist.
+- Role gates: `POST /orders` is `DOCTOR`-only (ordering is a clinical decision, same as EMR's prescription-writing routes); `GET /orders` and the result-entry route are `LAB_TECHNICIAN`-only.
+
+**OT & Cath Lab — `hims-backend/src/services/ot.service.ts`, `controllers/ot.controller.ts`, `routes/ot.routes.ts`:**
+
+- **`OTService.scheduleSurgery`** — the double-booking guard is a conflict query (same `theatreRoom`, a still-active booking whose scheduled window overlaps the requested one — `CANCELLED`/`POSTPONED` bookings don't block, everything else does, including `COMPLETED`, since a future booking is checked against other bookings' *planned* windows, not real-time actuals) followed by the `OTSchedule.create`, both inside one `withTransaction` call. Unlike `ADTService.admitPatient`'s single-document conditional claim, there's no one row to atomically flip for a range-overlap check — snapshot isolation across the transaction is what actually closes the race between two concurrent bookings for the same slot.
+- **`OTService.logSterilization`** — a cycle only certifies **PASS** — the regulatory basis for every instrument set inside it being eligible for OT use — when *both* the biological indicator (the definitive spore-test proof of sterilization efficacy) and the chemical indicator pass; a `PENDING` or `FAIL` biological result forces every instrument set in the cycle to `FAIL` regardless of what's submitted per set, rather than trusting caller input to override a failed/unverified cycle. `SterilizationLog.model.ts` has no separate instrument-set master collection — a set's OT-use eligibility *is* this document's own `instrumentSets[].cycleResult` — so this is a single-collection write and doesn't need `withTransaction`.
+- Both routes gated to `SystemRole.OT_COORDINATOR` (the closest existing role to "OT Admin" — there's no separate role for sterile-services staff in the Step 1 RBAC design).
+
+Both `tsc --noEmit` and `npm run build` verify clean. One pre-existing typing quirk worth flagging for future services touching array-of-subdocument fields: `LabOrderAttrs.tests` (and similarly-shaped fields elsewhere) is typed against the plain `LabOrderTestLine[]` interface rather than a Mongoose `DocumentArray`, so `.id()` isn't available at the type level even though the runtime document has it; `submitLabResult` works around this with a narrow cast + `.find()` by `_id`, documented inline at the one call site.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
 - [x] **Step 2** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID)
-- [x] **Step 3** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: LIMS + OT controllers/routes (out of scope so far).
+- [x] **Step 3** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. As of Step 9, LIMS + OT controllers/routes are no longer out of scope — see below.
 - [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. As of Step 8, every `// BACKEND GAP` this frontend was built against is resolved.
 - [x] **Step 5** — Docker, Nginx, production hosting guide. The stack builds and deploys today; as of Step 7, a fresh deploy can actually be logged into.
 - [x] **Step 6** — Master Admin Control Center: global Staff/Patient/Ward/Audit-Log directory and CRUD, gated to `SUPER_ADMIN`/`HOSPITAL_ADMIN`, including ACID patient-record merging.
 - [x] **Step 7** — Authentication flow (login/refresh-rotation-with-reuse-detection/logout/me) and application-layer rate limiting. Resolves the single largest gap called out by the Step 6 architecture review: the system is now actually usable end-to-end, not just built end-to-end.
 - [x] **Step 8** — Closes the two remaining core-clinical API gaps: IPD discharge (`ADTService.dischargePatient`, atomic bed release) and pharmacy drug search (the prescription builder's medication combobox). The frontend built in Step 4 now has a real backend behind every one of its hooks.
+- [x] **Step 9** — LIMS (lab order + reference-range-driven result flagging) and OT/Cath Lab (theatre double-booking guard + sterilization-cycle instrument eligibility) business logic, controllers, and routes. Every domain modeled in Step 1 now has a working backend; no frontend was built for either domain yet (out of scope for this step).
