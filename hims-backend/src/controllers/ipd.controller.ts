@@ -2,6 +2,8 @@ import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { Ward } from "../models/ipd/Ward.model.js";
 import { Bed } from "../models/ipd/Bed.model.js";
+import { Admission } from "../models/ipd/Admission.model.js";
+import { Patient } from "../models/mpi/Patient.model.js";
 import { adtService } from "../services/adt.service.js";
 import { WardCategory, AdmissionType } from "../types/common.types.js";
 import { AuthenticationError, ValidationError, NotFoundError } from "../utils/errors.js";
@@ -124,6 +126,80 @@ export async function getWardsMap(_req: Request, res: Response, next: NextFuncti
     });
 
     res.status(200).json({ data: wardsMap });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/ipd/admissions/:admissionId — the occupied-bed drawer's read:
+ * admission detail plus the minimal patient identity fields the drawer
+ * displays (name/UHID/DOB), so the frontend doesn't need a second
+ * round-trip to `/api/patients/:uhid` just to label the drawer.
+ */
+export async function getAdmissionDetail(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { admissionId } = req.params;
+    if (!admissionId) {
+      throw new ValidationError("admissionId route parameter is required");
+    }
+
+    const admission = await Admission.findById(admissionId).lean();
+    if (!admission) {
+      throw new NotFoundError(`Admission ${admissionId} not found`);
+    }
+
+    const patient = await Patient.findById(admission.patientId)
+      .select("uhid firstName lastName dateOfBirth")
+      .lean();
+    if (!patient) {
+      throw new NotFoundError(`Patient for admission ${admissionId} not found`);
+    }
+
+    res.status(200).json({ data: { admission, patient } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const DischargePatientSchema = z.object({
+  dischargeType: z.enum(["ROUTINE", "LAMA", "DAMA", "TRANSFER_OUT", "DECEASED"]).optional(),
+  reason: z.string().max(1000).optional(),
+});
+
+/**
+ * POST /api/ipd/admissions/:admissionId/discharge — closes out an
+ * admission via `ADTService.dischargePatient` (atomic Admission status
+ * update + bed release). Same role set as `GET /api/ipd/wards`: any of
+ * the roles that can see the occupied-bed drawer in the frontend's
+ * `BedManager` can also trigger its "Initiate Discharge" button, so the
+ * backend gate has to match or that button 403s for a role the UI
+ * otherwise lets use it.
+ */
+export async function dischargePatient(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError("Must be authenticated");
+    }
+
+    const { admissionId } = req.params;
+    if (!admissionId) {
+      throw new ValidationError("admissionId route parameter is required");
+    }
+
+    const parsed = DischargePatientSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw new ValidationError(formatZodError(parsed.error));
+    }
+
+    const result = await adtService.dischargePatient({
+      admissionId,
+      dischargeType: parsed.data.dischargeType,
+      reason: parsed.data.reason,
+      performedByUserId: req.user.id,
+    });
+
+    res.status(200).json({ data: result });
   } catch (err) {
     next(err);
   }

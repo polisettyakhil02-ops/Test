@@ -70,13 +70,7 @@ export interface AdmitPatientResult {
   bed: WardBedSummary & { wardId: string };
 }
 
-// BACKEND GAP: GET /api/ipd/admissions/:admissionId (returning
-// { admission, patient }) and POST /api/ipd/:admissionId/discharge don't
-// exist yet in hims-backend — Step 2's ADTService only built admitPatient.
-// A dischargePatient method following the same withTransaction pattern
-// (flip the bed back to VACANT, clear currentAdmissionId, set
-// Admission.status = DISCHARGED + actualDischargeDate) plus a thin
-// read for the occupied-bed drawer are the natural additions.
+/** GET /api/ipd/admissions/:admissionId response shape. */
 export interface AdmissionDetail {
   admission: Admission;
   patient: {

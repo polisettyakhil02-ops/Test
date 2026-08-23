@@ -5,7 +5,7 @@ import { BedStatus, AdmissionStatus, AdmissionType } from "../types/common.types
 import { generateAdmissionNumber } from "../utils/sequenceGenerator.js";
 import { toObjectId } from "../utils/objectId.js";
 import { firstOrThrow } from "../utils/assert.js";
-import { ValidationError, NotFoundError, ResourceUnavailableError } from "../utils/errors.js";
+import { ValidationError, NotFoundError, ConflictError, ResourceUnavailableError } from "../utils/errors.js";
 
 export interface AdmitPatientInput {
   patientId: string;
@@ -20,6 +20,47 @@ export interface AdmitPatientInput {
 }
 
 export interface AdmitPatientResult {
+  admission: AdmissionDocument;
+  bed: BedDocument;
+}
+
+/** The frontend's discharge form vocabulary — broader than `AdmissionStatus` since it distinguishes *why* a stay ended, not just its terminal state. Mapped onto the schema's actual status values below. */
+export type DischargeType = "ROUTINE" | "LAMA" | "DAMA" | "TRANSFER_OUT" | "DECEASED";
+
+/**
+ * `DAMA` (Discharge Against Medical Advice, a formal discharge the
+ * patient insists on) and `LAMA` (Left Against Medical Advice, walking
+ * out without one) are distinct clinical workflows in most Indian
+ * hospital systems, but this schema only models one terminal status for
+ * "left early against advice" — both map onto it. `TRANSFER_OUT` (to a
+ * different facility) ends this admission the same way a routine
+ * discharge does, so it maps onto `DISCHARGED` too; it isn't
+ * `AdmissionStatus.TRANSFERRED`, which means an in-hospital bed/ward
+ * transfer with the admission still open, not an end-of-stay event.
+ */
+const DISCHARGE_TYPE_TO_STATUS: Record<DischargeType, AdmissionStatus> = {
+  ROUTINE: AdmissionStatus.DISCHARGED,
+  TRANSFER_OUT: AdmissionStatus.DISCHARGED,
+  LAMA: AdmissionStatus.LAMA,
+  DAMA: AdmissionStatus.LAMA,
+  DECEASED: AdmissionStatus.DECEASED,
+};
+
+/** Admission states that still represent an active bed stay and can legally be discharged. Anything else (already DISCHARGED/LAMA/DECEASED/ABSCONDED) is a terminal state. */
+const ACTIVE_ADMISSION_STATUSES: AdmissionStatus[] = [
+  AdmissionStatus.ADMITTED,
+  AdmissionStatus.TRANSFERRED,
+  AdmissionStatus.DISCHARGE_PENDING,
+];
+
+export interface DischargePatientInput {
+  admissionId: string;
+  dischargeType?: DischargeType;
+  reason?: string;
+  performedByUserId: string;
+}
+
+export interface DischargePatientResult {
   admission: AdmissionDocument;
   bed: BedDocument;
 }
@@ -114,6 +155,72 @@ export class ADTService {
     if (!input.provisionalDiagnosis?.trim()) {
       throw new ValidationError("provisionalDiagnosis is required");
     }
+  }
+
+  /**
+   * The natural counterpart to `admitPatient`: closes out the Admission
+   * and frees the bed atomically, so a failure partway through can never
+   * leave the two out of sync (an admission marked DISCHARGED with a bed
+   * still stuck OCCUPIED, or vice versa). The bed goes to `CLEANING`, not
+   * straight back to `VACANT` — a just-vacated bed needs housekeeping
+   * before it's fit to admit into again; a separate ward/infrastructure
+   * workflow (see `admin.service.ts`'s bed-status management) is what
+   * marks it `VACANT` once that's done.
+   */
+  async dischargePatient(input: DischargePatientInput): Promise<DischargePatientResult> {
+    const admissionId = toObjectId(input.admissionId, "admissionId");
+
+    return withTransaction(async (session) => {
+      const admission = await Admission.findById(admissionId).session(session);
+      if (!admission) {
+        throw new NotFoundError(`Admission ${input.admissionId} not found`);
+      }
+      if (!ACTIVE_ADMISSION_STATUSES.includes(admission.status)) {
+        throw new ConflictError(
+          `Admission ${admission.admissionNumber} is already ${admission.status} and cannot be discharged again`,
+        );
+      }
+
+      const now = new Date();
+      const dischargeStatus = input.dischargeType
+        ? DISCHARGE_TYPE_TO_STATUS[input.dischargeType]
+        : AdmissionStatus.DISCHARGED;
+
+      admission.status = dischargeStatus;
+      admission.actualDischargeDate = now;
+      admission.bedMovementHistory.push({
+        wardId: admission.currentWardId,
+        bedId: admission.currentBedId,
+        movementType: "DISCHARGE",
+        reason: input.reason,
+        effectiveAt: now,
+        performedByUserId: input.performedByUserId,
+      });
+      await admission.save({ session });
+
+      // Mirrors admitPatient's conditional claim: only flip the bed if it's
+      // still the OCCUPIED bed this admission expects. If it isn't (a data
+      // anomaly, or a concurrent operation already changed it), abort the
+      // whole transaction rather than silently overwriting an unexpected
+      // bed state or leaving the admission and bed out of sync.
+      const freedBed = await Bed.findOneAndUpdate(
+        { _id: admission.currentBedId, status: BedStatus.OCCUPIED },
+        { $set: { status: BedStatus.CLEANING }, $unset: { currentAdmissionId: "" } },
+        { new: true, session },
+      );
+
+      if (!freedBed) {
+        const existingBed = await Bed.findById(admission.currentBedId).session(session).lean();
+        if (!existingBed) {
+          throw new NotFoundError(`Bed ${admission.currentBedId.toString()} not found`);
+        }
+        throw new ResourceUnavailableError(
+          `Bed ${existingBed.bedNumber} was not OCCUPIED (current status: ${existingBed.status}); refusing to discharge against a bed/admission state mismatch`,
+        );
+      }
+
+      return { admission, bed: freedBed };
+    });
   }
 }
 

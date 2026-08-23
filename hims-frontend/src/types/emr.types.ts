@@ -118,10 +118,7 @@ export interface TimelineEntry {
   data: Record<string, unknown> & { vitals?: VitalSigns };
 }
 
-// BACKEND GAP: GET /api/pharmacy/drugs?search= doesn't exist yet in
-// hims-backend — Step 3's pharmacy routes only covered the dispensation
-// worklist/action, not browsing the Drug catalog. This is the assumed
-// response contract for the prescription builder's medication search.
+/** GET /api/pharmacy/drugs?search= response shape — powers the prescription builder's medication search. */
 export interface DrugSearchResult {
   _id: string;
   drugCode: string;

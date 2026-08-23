@@ -1,10 +1,11 @@
 import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { Prescription } from "../models/emr/Prescription.model.js";
+import { Drug } from "../models/pharmacy/Drug.model.js";
 import { pharmacyService } from "../services/pharmacy.service.js";
 import { PrescriptionStatus } from "../types/common.types.js";
 import { AuthenticationError, ValidationError, NotFoundError } from "../utils/errors.js";
-import { formatZodError } from "../utils/validation.js";
+import { formatZodError, escapeRegex } from "../utils/validation.js";
 
 /**
  * GET /api/pharmacy/prescriptions/pending — the pharmacy counter's
@@ -73,6 +74,46 @@ export async function dispenseMedication(req: Request, res: Response, next: Next
     });
 
     res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const DrugSearchQuerySchema = z.object({
+  search: z.string().trim().min(1, "search query is required").max(200),
+});
+
+/** Caps the combobox result set — a search endpoint backing live-typing autocomplete has no business returning hundreds of rows. */
+const DRUG_SEARCH_RESULT_LIMIT = 20;
+
+/**
+ * GET /api/pharmacy/drugs?search= — the prescription builder's
+ * medication combobox. Deliberately a case-insensitive regex over
+ * `genericName`/`brandName`/`drugCode` rather than the schema's `$text`
+ * index (`Drug.model.ts` has one): `$text` tokenizes and stems whole
+ * words, so it wouldn't match a live-typed prefix like "par" against
+ * "Paracetamol" the way an autocomplete needs to. User input is escaped
+ * via `escapeRegex` before being used to build the pattern — required
+ * so a search term containing regex metacharacters can't throw or
+ * widen the match unexpectedly.
+ */
+export async function searchDrugs(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parsed = DrugSearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw new ValidationError(formatZodError(parsed.error));
+    }
+
+    const pattern = new RegExp(escapeRegex(parsed.data.search), "i");
+    const drugs = await Drug.find({
+      isActive: true,
+      $or: [{ genericName: pattern }, { brandName: pattern }, { drugCode: pattern }],
+    })
+      .sort({ genericName: 1 })
+      .limit(DRUG_SEARCH_RESULT_LIMIT)
+      .lean();
+
+    res.status(200).json({ data: drugs });
   } catch (err) {
     next(err);
   }

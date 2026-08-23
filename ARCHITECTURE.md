@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-7)
+# HIMS Platform — Architecture Blueprint (Steps 1-8)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -240,12 +240,30 @@ Combined with the per-account lockout in `AuthService.login`, brute-forcing now 
 
 Both `tsc --noEmit` and `npm run build` verify clean with these changes; no placeholder logic anywhere in the new auth surface.
 
+## Step 8 deliverables (this checkpoint)
+
+Closing Core Clinical API Gaps — the two remaining `// BACKEND GAP:` markers left in `hims-frontend` after Step 7 (`grep -rn "BACKEND GAP" hims-frontend/src` now returns nothing).
+
+**IPD discharge — `hims-backend/src/services/adt.service.ts`, `controllers/ipd.controller.ts`, `routes/ipd.routes.ts`:**
+
+- **`ADTService.dischargePatient`** — the natural counterpart to `admitPatient`, same ACID discipline: one `withTransaction` call marks the `Admission` discharged (status + `actualDischargeDate` + an appended `DISCHARGE` `bedMovementHistory` entry) and releases the bed via a *conditional* `findOneAndUpdate({_id, status: OCCUPIED})` — mirroring `admitPatient`'s own double-booking guard, so a bed that's unexpectedly not `OCCUPIED` (data drift, a race) aborts the whole transaction with a `ResourceUnavailableError` instead of silently overwriting an inconsistent state. The bed goes to `BedStatus.CLEANING`, not straight back to `VACANT` — a just-vacated bed needs housekeeping first; a ward/infrastructure workflow (Step 6's admin bed-status management) is what marks it `VACANT` once that's done. Guards against double-discharge via an `ACTIVE_ADMISSION_STATUSES` allowlist (`ConflictError` if the admission is already terminal). The frontend's five-value `dischargeType` vocabulary (`ROUTINE`/`LAMA`/`DAMA`/`TRANSFER_OUT`/`DECEASED`) is mapped onto the schema's four-value `AdmissionStatus` (`DAMA` and `LAMA` both mean "left early against advice" here; `TRANSFER_OUT` ends this admission the same way `ROUTINE` does, so it isn't confused with `AdmissionStatus.TRANSFERRED`, which means an in-hospital bed/ward move with the admission still open).
+- **`GET /api/ipd/admissions/:admissionId`** / **`POST /api/ipd/admissions/:admissionId/discharge`** — both under a shared `BED_MANAGEMENT_ROLES` constant (Receptionist/Hospital Admin/Doctor/Head Nurse/Staff Nurse) matching `GET /api/ipd/wards`'s existing gate, since all three routes back the same `BedManager` UI surface (grid + occupied-bed drawer + its discharge button) and must not silently drift apart into inconsistent role gates.
+- The discharge route path is `/admissions/:admissionId/discharge`, not the flatter `/​:admissionId/discharge` the Step 4 frontend hook had speculatively guessed — corrected for REST consistency with the sibling `GET /admissions/:admissionId` route, and the frontend hook (`useDischargePatient.ts`) updated to match, since that guess was never a fixed contract (it was explicitly flagged `// BACKEND GAP` pending exactly this step).
+
+**Pharmacy drug search — `hims-backend/src/controllers/pharmacy.controller.ts`, `routes/pharmacy.routes.ts`:**
+
+- **`GET /api/pharmacy/drugs?search=`** — case-insensitive regex over `genericName`/`brandName`/`drugCode`, `isActive: true` only, capped at 20 results. Deliberately regex, not the schema's existing `$text` index: `$text` tokenizes and stems whole words, so it wouldn't match a live-typed prefix like "par" against "Paracetamol" the way a combobox needs. User input runs through a new `escapeRegex()` helper (`utils/validation.ts`) before being interpolated into the pattern — without it, a search term containing regex metacharacters could throw or match far more than intended.
+- Authorized for `DOCTOR` and `PHARMACIST` — the actual caller is the prescription builder's medication combobox on `DoctorDesk` (`EMR_ROLES`-gated at the frontend router), not the pharmacist-only dispensation worklist this router otherwise serves, so `PHARMACIST`-only (matching the router's other two routes) would have 403'd the one page that actually needs this endpoint.
+
+Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
 - [x] **Step 2** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID)
 - [x] **Step 3** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: LIMS + OT controllers/routes (out of scope so far).
-- [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. As of Step 7, no longer blocked by missing auth routes — two smaller endpoint gaps remain (discharge, drug search).
+- [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. As of Step 8, every `// BACKEND GAP` this frontend was built against is resolved.
 - [x] **Step 5** — Docker, Nginx, production hosting guide. The stack builds and deploys today; as of Step 7, a fresh deploy can actually be logged into.
 - [x] **Step 6** — Master Admin Control Center: global Staff/Patient/Ward/Audit-Log directory and CRUD, gated to `SUPER_ADMIN`/`HOSPITAL_ADMIN`, including ACID patient-record merging.
 - [x] **Step 7** — Authentication flow (login/refresh-rotation-with-reuse-detection/logout/me) and application-layer rate limiting. Resolves the single largest gap called out by the Step 6 architecture review: the system is now actually usable end-to-end, not just built end-to-end.
+- [x] **Step 8** — Closes the two remaining core-clinical API gaps: IPD discharge (`ADTService.dischargePatient`, atomic bed release) and pharmacy drug search (the prescription builder's medication combobox). The frontend built in Step 4 now has a real backend behind every one of its hooks.
