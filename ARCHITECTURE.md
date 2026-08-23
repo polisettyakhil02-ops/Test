@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Step 1)
+# HIMS Platform — Architecture Blueprint (Steps 1-4)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -7,7 +7,7 @@ top-level TypeScript/MERN system:
 
 ```
 hims-backend/     Express + TypeScript API, MongoDB replica set, Redis
-hims-frontend/    React (Vite/TS) client                              [Step 4]
+hims-frontend/    React (Vite/TS) client
 docker/           Nginx config, compose files, deployment guide        [Step 5]
 ```
 
@@ -71,17 +71,26 @@ hims-backend/
 ├── .env.example                                                        ✅ Step 1
 └── README.md                                                           ✅ Step 1
 
-hims-frontend/                                                          [Step 4]
+hims-frontend/                                                          ✅ Step 4
 ├── src/
-│   ├── app/                    # routing, providers (React Query, auth context)
-│   ├── components/             # shared UI (shadcn/ui + Tailwind)
-│   ├── features/
-│   │   ├── opd/ ├── ipd/ ├── emr/ ├── pharmacy/ ├── lims/ ├── billing/ ...
-│   ├── layouts/                # role-based nav shell
-│   ├── lib/                    # api client, query hooks
-│   └── types/                  # imports DTOs mirrored from hims-backend/src/types
+│   ├── types/                   # DTOs mirroring hims-backend/src/types, plus a few response-shape types  ✅ Step 4
+│   ├── lib/                     # axios instance (+401/refresh interceptor), tokenStore, jwt decode, queryClient, cn  ✅ Step 4
+│   ├── context/AuthContext.tsx  # login/logout/me bootstrap, proactive token refresh                       ✅ Step 4
+│   ├── hooks/                   # one TanStack Query hook file per API concern (useBeds, useAdmitPatient, ...)  ✅ Step 4
+│   ├── components/
+│   │   ├── layout/              # DashboardLayout, Sidebar (role-filtered nav), Header, nav.config.ts       ✅ Step 4
+│   │   ├── ui/                  # Button, Card, Badge, Modal, Drawer, Input, Select, Spinner, EmptyState    ✅ Step 4
+│   │   └── ProtectedRoute.tsx   # auth + role gate, mirrors backend's protect -> authorizeRoles chain       ✅ Step 4
+│   ├── pages/
+│   │   ├── LoginPage.tsx, DashboardHome.tsx                                                                 ✅ Step 4
+│   │   ├── ipd/BedManager.tsx   # color-coded ward/bed grid, admit modal, occupied-bed drawer + discharge   ✅ Step 4
+│   │   ├── emr/DoctorDesk.tsx   # history/timeline panel + SOAP note form + prescription builder            ✅ Step 4
+│   │   ├── pharmacy/DispensationQueue.tsx                                                                   ✅ Step 4
+│   │   └── billing/InvoiceView.tsx  # print-friendly categorized invoice + payment mutation                 ✅ Step 4
+│   ├── App.tsx                  # route tree, nested ProtectedRoute per role group
+│   └── main.tsx                 # BrowserRouter + QueryClientProvider + AuthProvider
 ├── package.json
-├── vite.config.ts
+├── vite.config.ts               # /api dev-proxy to hims-backend
 └── tailwind.config.ts
 
 docker/                                                                 [Step 5]
@@ -142,10 +151,28 @@ Two deliberate deviations from the literal spec, both to keep the system correct
 
 Not yet built: login/refresh-token-rotation service, LIMS/OT controllers & routes (not in this checkpoint's scope), repositories layer (not needed yet — no domain's data access has grown complex enough to warrant one).
 
+## Step 4 deliverables (this checkpoint)
+
+New `hims-frontend/` client — React 18, Vite, TypeScript (strict, `noUncheckedIndexedAccess`), Tailwind CSS, TanStack Query, react-router-dom, react-hook-form + zod. `tsc -b && vite build` succeeds clean.
+
+- **`context/AuthContext.tsx`** + **`lib/{tokenStore,jwt,axios}.ts`** — access token held in memory only (never localStorage — XSS resistance), attached via an axios request interceptor with the JWT decoded (`lib/jwt.ts`, dependency-free) to schedule a proactive refresh ahead of `exp`; a response interceptor retries once through a silent refresh on a `TOKEN_EXPIRED` 401. A page reload rehydrates the session from the HTTP-only cookie via `GET /api/auth/me`, never from anything client-readable.
+- **`components/layout/`** — `DashboardLayout` (collapsible sidebar + header, `print:`-aware so `InvoiceView`'s print button doesn't print the chrome), `Sidebar` filtering `nav.config.ts` by `useAuth().hasRole(...)`, `ProtectedRoute` mirroring the backend's `protect -> authorizeRoles` chain per route group in `App.tsx`.
+- **`pages/ipd/BedManager.tsx`** — color-coded grid over all 6 `BedStatus` values (not just the 3 the spec named); a VACANT bed opens `AdmitPatientModal` (UHID lookup → `ADTService.admitPatient`), an OCCUPIED bed opens `BedDetailDrawer` (admission detail + discharge).
+- **`pages/emr/DoctorDesk.tsx`** — `PatientHistoryPanel` (timeline + recent vitals + active diagnoses, all from the Step 3 timeline endpoint) alongside `ClinicalNoteForm` (SOAP + a `useFieldArray` ICD-10 diagnoses list) and `PrescriptionBuilder` (medication search combobox, a "1-0-1"-style dosing-pattern input converted to the backend's `frequencyPerDay`, and an allergy-hard-stop → override-with-reason flow matching `Prescription`'s own validation hook from Step 1).
+- **`pages/billing/InvoiceView.tsx`** — categorized, print-friendly invoice; `usePayInvoice` writes the mutation result straight into the `activeInvoice` query cache, so the status badge flips to PAID/PARTIALLY_PAID with no refetch, per the spec.
+- **`hooks/`** — one TanStack Query hook file per API concern, exactly as asked (`useBeds`, `useAdmitPatient`, `usePatientTimeline`, plus every other read/mutation the four pages need).
+
+**Backend gaps this frontend is built against but hims-backend doesn't implement yet** (each marked `// BACKEND GAP:` at its one call site — `grep -rn "BACKEND GAP" hims-frontend/src`):
+1. `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/refresh`, `GET /api/auth/me` — blocks everything; Step 2/3 built the `User` model, bcrypt hashing, and JWT utils these would use, but never the routes themselves.
+2. `POST /api/ipd/:admissionId/discharge` + `GET /api/ipd/admissions/:admissionId` — needed by `BedManager`'s discharge button and occupied-bed drawer; the natural counterpart to `ADTService.admitPatient`.
+3. `GET /api/pharmacy/drugs?search=` — needed by the prescription builder's medication search.
+
+None of the four pages requested are stubs — every hook makes a real, correctly-typed call to either a real Step 3 endpoint or one of the three gaps above, so each starts working the moment its endpoint lands.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
 - [x] **Step 2** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID)
 - [x] **Step 3 (partial)** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: login/refresh-token-rotation service, LIMS + OT controllers/routes.
-- [ ] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI
+- [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. Blocked end-to-end only by the auth routes and two smaller gaps listed above.
 - [ ] **Step 5** — Docker, Nginx, production hosting guide

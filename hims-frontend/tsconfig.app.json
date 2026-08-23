@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    // Composite projects must emit; Vite does the real bundling separately,
+    // so this only needs to land somewhere out of the way (already covered
+    // by the existing "node_modules/" .gitignore rule) rather than next to
+    // the source files.
+    "outDir": "./node_modules/.tsc-out/app",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "include": ["src"]
+}
