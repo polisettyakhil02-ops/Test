@@ -1,4 +1,4 @@
-import type { SystemRole, WardCategory, BedStatus, AuditAction, Gender, BloodGroup } from "./common.types";
+import type { SystemRole, WardCategory, BedStatus, AuditAction, Gender, BloodGroup, PermissionAction } from "./common.types";
 import type { Address, EmergencyContact, Patient } from "./patient.types";
 
 /* ============================================================================
@@ -233,4 +233,30 @@ export interface AuditLogQuery {
   sortOrder?: "asc" | "desc";
   page: number;
   limit: number;
+}
+
+/* ============================================================================
+ * Role & Permission Matrix
+ * ==========================================================================*/
+
+/** One (resource, actions[]) grant — mirrors `PermissionGrant` in hims-backend/src/models/admin/Role.model.ts exactly. */
+export interface PermissionGrant {
+  resource: string;
+  actions: PermissionAction[];
+}
+
+/** A named, editable permission matrix — mirrors `RoleAttrs` in Role.model.ts. */
+export interface RoleWithPermissions {
+  _id: string;
+  systemRole: SystemRole;
+  displayName: string;
+  description?: string;
+  permissions: PermissionGrant[];
+  /** false for SUPER_ADMIN — its grants can't be narrowed via this UI (see the backend model's own doc comment). */
+  isEditable: boolean;
+}
+
+export interface UpdateRolePermissionsPayload {
+  systemRole: SystemRole;
+  permissions: PermissionGrant[];
 }

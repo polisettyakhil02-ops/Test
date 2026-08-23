@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-9)
+# HIMS Platform — Architecture Blueprint (Steps 1-10)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -277,6 +277,22 @@ since Step 1 but no business logic, controllers, or routes.
 
 Both `tsc --noEmit` and `npm run build` verify clean. One pre-existing typing quirk worth flagging for future services touching array-of-subdocument fields: `LabOrderAttrs.tests` (and similarly-shaped fields elsewhere) is typed against the plain `LabOrderTestLine[]` interface rather than a Mongoose `DocumentArray`, so `.id()` isn't available at the type level even though the runtime document has it; `submitLabResult` works around this with a narrow cast + `.find()` by `_id`, documented inline at the one call site.
 
+## Step 10 deliverables (this checkpoint)
+
+Frontend Optimization & RBAC Admin UI.
+
+**Bundle-size optimization — `hims-frontend/vite.config.ts`:**
+
+- Added `build.rollupOptions.output.manualChunks`, a `vendorChunk(id)` function (not a static object) that buckets every `node_modules` module by matching the literal `node_modules/<package>/` path segment — precise regardless of npm/pnpm nesting depth, and checked in specificity order (`react-dom` before bare `react`) so e.g. `react-router-dom`/`react-hook-form` never get swept into the `react`-only bucket just because their names start with "react". Produces `vendor-react`, `vendor-react-dom`, `vendor-tanstack` (react-query + react-table together — same ecosystem, commonly loaded on the same admin pages), a `vendor-icons` rule kept ready for `lucide-react` even though **it isn't currently a dependency of this project** (the app renders inline Unicode glyphs for icons — see `nav.config.ts` — so nothing today actually lands in that bucket), and a general `vendor` catch-all for everything else third-party. Rebuilding now produces five chunks (`vendor-react` ~12KB, `vendor-tanstack` ~91KB, app `index` ~101KB, `vendor-react-dom` ~130KB, `vendor` ~182KB, each gzip-compressed further) instead of one ~513KB bundle — the Vite bundle-size warning is gone.
+
+**RBAC Permission UI — `hims-frontend/src/pages/admin/RoleManagement.tsx`:**
+
+- A role selector plus a resource × {CREATE, READ, UPDATE, DELETE} checkbox grid for the selected role's `Role.permissions` matrix (`hims-backend/src/models/admin/Role.model.ts`, built in Step 1, never exposed by an admin UI until now). `PermissionAction` has six more values (APPROVE, DISPENSE, ADMINISTER, DISCHARGE, BILL, EXPORT) reserved for workflow-specific grants this generic grid deliberately doesn't render; `grantsFromMatrix()` preserves any such action — or any resource this grid never displayed at all — unchanged on save, so Save can never silently erase a grant the admin wasn't shown. SUPER_ADMIN renders read-only (`isEditable: false`, matching the backend model's own documented intent that its grants can't be narrowed via this UI).
+- New `useRoles`/`useUpdateRolePermissions` hooks (`hooks/useAdmin.ts`), `PermissionAction` added to `types/common.types.ts` (mirroring the backend enum), and `PermissionGrant`/`RoleWithPermissions`/`UpdateRolePermissionsPayload` added to `types/admin.types.ts`. Wired into the admin shell: a "Roles & Permissions" nav entry in `AdminLayout.tsx` and an `/admin/roles` route in `App.tsx`.
+- **This is written against a backend that doesn't exist yet** — `GET /api/admin/roles` and `PUT /api/admin/roles/:systemRole/permissions` aren't implemented in `admin.controller.ts`/`admin.routes.ts`. Marked `// BACKEND GAP` in `useAdmin.ts`, the same convention Step 4's frontend used for the gaps Steps 7–8 later closed. The page is fully wired and will start working the moment those two routes land; until then, `/admin/roles` will show a load error against a live backend. Not part of this step's requested scope (frontend-only), but flagged here rather than silently shipping a dead mutation.
+
+Both `hims-frontend` (`tsc -b`, `vite build`) verify clean.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
@@ -288,3 +304,4 @@ Both `tsc --noEmit` and `npm run build` verify clean. One pre-existing typing qu
 - [x] **Step 7** — Authentication flow (login/refresh-rotation-with-reuse-detection/logout/me) and application-layer rate limiting. Resolves the single largest gap called out by the Step 6 architecture review: the system is now actually usable end-to-end, not just built end-to-end.
 - [x] **Step 8** — Closes the two remaining core-clinical API gaps: IPD discharge (`ADTService.dischargePatient`, atomic bed release) and pharmacy drug search (the prescription builder's medication combobox). The frontend built in Step 4 now has a real backend behind every one of its hooks.
 - [x] **Step 9** — LIMS (lab order + reference-range-driven result flagging) and OT/Cath Lab (theatre double-booking guard + sterilization-cycle instrument eligibility) business logic, controllers, and routes. Every domain modeled in Step 1 now has a working backend; no frontend was built for either domain yet (out of scope for this step).
+- [x] **Step 10** — Frontend optimization (Vite `manualChunks` code-splitting, resolving the bundle-size warning) and the RBAC permission-matrix editor (`RoleManagement.tsx`). The editor is built against `GET/PUT /api/admin/roles*` endpoints that don't exist yet — a new `// BACKEND GAP`, tracked the same way Step 4's gaps were until Steps 7–8 closed them.

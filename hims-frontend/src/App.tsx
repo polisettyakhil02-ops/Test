@@ -9,6 +9,7 @@ import { DispensationQueue } from "@/pages/pharmacy/DispensationQueue";
 import { InvoiceView } from "@/pages/billing/InvoiceView";
 import { AdminLayout } from "@/pages/admin/AdminLayout";
 import { StaffDirectory } from "@/pages/admin/StaffDirectory";
+import { RoleManagement } from "@/pages/admin/RoleManagement";
 import { PatientDirectory } from "@/pages/admin/PatientDirectory";
 import { InfrastructureMaster } from "@/pages/admin/InfrastructureMaster";
 import { AuditInspector } from "@/pages/admin/AuditInspector";
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="/admin/staff" replace />} />
           <Route path="staff" element={<StaffDirectory />} />
+          <Route path="roles" element={<RoleManagement />} />
           <Route path="patients" element={<PatientDirectory />} />
           <Route path="wards" element={<InfrastructureMaster />} />
           <Route path="audit-logs" element={<AuditInspector />} />

@@ -18,6 +18,8 @@ import type {
   SetBedStatusPayload,
   AuditLogEntry,
   AuditLogQuery,
+  RoleWithPermissions,
+  UpdateRolePermissionsPayload,
 } from "@/types/admin.types";
 
 /** Strips undefined/empty-string values so they don't get serialized as literal "undefined" query-string params. */
@@ -228,5 +230,39 @@ export function useAuditLogs(query: AuditLogQuery) {
     // explicitly calls it out as one, so poll rather than requiring a
     // manual refresh.
     refetchInterval: 15_000,
+  });
+}
+
+/* ============================================================================
+ * Role & Permission Matrix
+ * ==========================================================================*/
+
+// BACKEND GAP: GET /api/admin/roles and PUT /api/admin/roles/:systemRole/permissions
+// don't exist in hims-backend yet. The Role model and its editable
+// `permissions` matrix were built in Step 1 for exactly this UI, but
+// admin.controller.ts (Step 6) never exposed a route for it — see
+// ARCHITECTURE.md's Step 10 notes. Written against the natural REST shape
+// every other admin master here already follows (a GET list + a scoped
+// PUT update), so this starts working the moment those two routes land.
+export function useRoles() {
+  return useQuery({
+    queryKey: ["adminRoles"],
+    queryFn: async () => {
+      const response = await api.get<ApiEnvelope<RoleWithPermissions[]>>("/admin/roles");
+      return response.data.data;
+    },
+  });
+}
+
+export function useUpdateRolePermissions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ systemRole, permissions }: UpdateRolePermissionsPayload) => {
+      const response = await api.put<ApiEnvelope<RoleWithPermissions>>(`/admin/roles/${systemRole}/permissions`, {
+        permissions,
+      });
+      return response.data.data;
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["adminRoles"] }),
   });
 }

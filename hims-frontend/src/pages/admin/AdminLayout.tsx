@@ -19,6 +19,7 @@ interface AdminNavItem {
  */
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { label: "Staff Directory", path: "/admin/staff", description: "Doctors, nurses, and all other staff accounts" },
+  { label: "Roles & Permissions", path: "/admin/roles", description: "Edit each role's resource-level permission matrix" },
   { label: "Patient Directory", path: "/admin/patients", description: "Global patient search, edits, and duplicate merges" },
   { label: "Ward / Infrastructure Master", path: "/admin/wards", description: "Wards, bed counts, maintenance status" },
   { label: "Tariff / Billing Master", path: "/admin/wards", description: "Bed rent pricing by ward category" },

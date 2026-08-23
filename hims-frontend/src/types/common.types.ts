@@ -155,6 +155,20 @@ export const PaymentMode = {
 } as const;
 export type PaymentMode = (typeof PaymentMode)[keyof typeof PaymentMode];
 
+export const PermissionAction = {
+  CREATE: "CREATE",
+  READ: "READ",
+  UPDATE: "UPDATE",
+  DELETE: "DELETE",
+  APPROVE: "APPROVE",
+  DISPENSE: "DISPENSE",
+  ADMINISTER: "ADMINISTER",
+  DISCHARGE: "DISCHARGE",
+  BILL: "BILL",
+  EXPORT: "EXPORT",
+} as const;
+export type PermissionAction = (typeof PermissionAction)[keyof typeof PermissionAction];
+
 export const AuditAction = {
   CREATE: "CREATE",
   READ: "READ",
