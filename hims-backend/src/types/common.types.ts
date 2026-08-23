@@ -45,6 +45,8 @@ export enum SystemRole {
   OT_COORDINATOR = "OT_COORDINATOR",
   AUDITOR = "AUDITOR",
   PATIENT = "PATIENT",
+  BIOMEDICAL_ENGINEER = "BIOMEDICAL_ENGINEER",
+  TPA_OFFICER = "TPA_OFFICER",
 }
 
 export enum PermissionAction {
@@ -143,6 +145,8 @@ export enum PreAuthStatus {
   PARTIALLY_APPROVED = "PARTIALLY_APPROVED",
   REJECTED = "REJECTED",
   QUERY_RAISED = "QUERY_RAISED",
+  /** Terminal state: the TPA-approved portion has been posted as a Payment against the Invoice and the patient co-pay is known. See insurance.service.ts#settleClaim. */
+  SETTLED = "SETTLED",
 }
 
 export enum PrescriptionStatus {
@@ -239,6 +243,83 @@ export enum PurchaseOrderStatus {
   PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED",
   RECEIVED = "RECEIVED",
   CANCELLED = "CANCELLED",
+}
+
+/* ============================================================================
+ * Step 11 — Biomedical Asset/AMC, Payroll/Revenue Share, TPA claim settlement
+ * ==========================================================================*/
+
+export enum AssetCategory {
+  MRI = "MRI",
+  CT_SCAN = "CT_SCAN",
+  XRAY = "XRAY",
+  ULTRASOUND = "ULTRASOUND",
+  VENTILATOR = "VENTILATOR",
+  INFUSION_PUMP = "INFUSION_PUMP",
+  DEFIBRILLATOR = "DEFIBRILLATOR",
+  ANESTHESIA_MACHINE = "ANESTHESIA_MACHINE",
+  DIALYSIS_MACHINE = "DIALYSIS_MACHINE",
+  OTHER = "OTHER",
+}
+
+export enum AssetStatus {
+  ACTIVE = "ACTIVE",
+  UNDER_MAINTENANCE = "UNDER_MAINTENANCE",
+  AWAITING_PARTS = "AWAITING_PARTS",
+  DECOMMISSIONED = "DECOMMISSIONED",
+}
+
+export enum AssetCriticality {
+  LOW = "LOW",
+  MEDIUM = "MEDIUM",
+  HIGH = "HIGH",
+}
+
+export enum AmcCoverageType {
+  COMPREHENSIVE = "COMPREHENSIVE",
+  LABOUR_ONLY = "LABOUR_ONLY",
+  PARTS_ONLY = "PARTS_ONLY",
+  NONE = "NONE",
+}
+
+export enum MaintenanceTicketType {
+  PREVENTIVE = "PREVENTIVE",
+  BREAKDOWN = "BREAKDOWN",
+}
+
+export enum MaintenanceTicketStatus {
+  OPEN = "OPEN",
+  IN_PROGRESS = "IN_PROGRESS",
+  RESOLVED = "RESOLVED",
+  CLOSED = "CLOSED",
+}
+
+export enum MaintenanceTicketPriority {
+  LOW = "LOW",
+  MEDIUM = "MEDIUM",
+  HIGH = "HIGH",
+  CRITICAL = "CRITICAL",
+}
+
+/** Distinguishes salaried in-house staff from fee-split visiting/retainer doctors — the sole input, alongside `RevenueCategory`, to the payroll revenue-share lookup. */
+export enum DoctorEmploymentType {
+  IN_HOUSE = "IN_HOUSE",
+  VISITING = "VISITING",
+  CONSULTANT_RETAINER = "CONSULTANT_RETAINER",
+}
+
+/** What kind of billed activity a revenue-share percentage applies to. OT roles are split out because a surgeon's cut of an OT charge is never the same percentage as their assistant's or the anesthetist's. */
+export enum RevenueCategory {
+  OPD_CONSULTATION = "OPD_CONSULTATION",
+  OT_SURGEON = "OT_SURGEON",
+  OT_ASSISTANT_SURGEON = "OT_ASSISTANT_SURGEON",
+  OT_ANESTHETIST = "OT_ANESTHETIST",
+}
+
+export enum PayoutStatus {
+  DRAFT = "DRAFT",
+  FINALIZED = "FINALIZED",
+  PAID = "PAID",
 }
 
 export enum AuditAction {

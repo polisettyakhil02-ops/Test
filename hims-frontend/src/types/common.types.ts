@@ -19,6 +19,8 @@ export const SystemRole = {
   OT_COORDINATOR: "OT_COORDINATOR",
   AUDITOR: "AUDITOR",
   PATIENT: "PATIENT",
+  BIOMEDICAL_ENGINEER: "BIOMEDICAL_ENGINEER",
+  TPA_OFFICER: "TPA_OFFICER",
 } as const;
 export type SystemRole = (typeof SystemRole)[keyof typeof SystemRole];
 

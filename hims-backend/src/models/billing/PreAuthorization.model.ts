@@ -10,7 +10,14 @@ export interface PreAuthQuery {
   respondedByUserId?: string;
 }
 
-/** TPA/insurer pre-authorization workflow for a planned or ongoing admission. */
+/**
+ * TPA/insurer pre-authorization workflow for a planned or ongoing
+ * admission. The claim's lifecycle continues past approval, through this
+ * same `status` field, to `SETTLED` once the final bill is split between
+ * insurer and patient — see `insurance.service.ts#settleClaim` (Step 11),
+ * which populates `invoiceId`/`tpaApprovedAmount`/`patientCoPayAmount`/
+ * `settledAt`/`settlementPaymentId` at that point.
+ */
 export interface PreAuthorizationAttrs {
   preAuthNumber: string;
   admissionId: Types.ObjectId;
@@ -28,6 +35,15 @@ export interface PreAuthorizationAttrs {
   queries: PreAuthQuery[];
   rejectionReason?: string;
   attachmentStorageKeys: string[];
+  /** Set once the final Invoice for this admission is ready to settle against — see settleClaim. */
+  invoiceId?: Types.ObjectId;
+  /** The insurer's final contribution at settlement — may differ from `approvedAmount` (the pre-auth estimate) once the actual bill is known; never exceeds the invoice's grandTotal. */
+  tpaApprovedAmount?: number;
+  /** grandTotal - tpaApprovedAmount at settlement — what the patient owes at the counter. */
+  patientCoPayAmount?: number;
+  settledAt?: Date;
+  /** The Payment record settleClaim posts against the Invoice for the TPA's contribution. */
+  settlementPaymentId?: Types.ObjectId;
   createdBy: string;
 }
 
@@ -63,6 +79,11 @@ const PreAuthorizationSchema = new Schema<PreAuthorizationAttrs>(
     queries: { type: [PreAuthQuerySchema], default: [] },
     rejectionReason: { type: String, trim: true },
     attachmentStorageKeys: { type: [String], default: [] },
+    invoiceId: { type: Schema.Types.ObjectId, ref: "Invoice" },
+    tpaApprovedAmount: { type: Number, min: 0 },
+    patientCoPayAmount: { type: Number, min: 0 },
+    settledAt: { type: Date },
+    settlementPaymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
     createdBy: { type: String, required: true },
   },
   { timestamps: true, collection: "pre_authorizations" },

@@ -1,8 +1,33 @@
 import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
+import { OTSchedule } from "../models/ot/OTSchedule.model.js";
 import { otService } from "../services/ot.service.js";
 import { AuthenticationError, ValidationError } from "../utils/errors.js";
 import { formatZodError } from "../utils/validation.js";
+
+/** GET /api/ot/surgeries?date= — the daily room timeline (OT 1, OT 2, Cath Lab, ...). Defaults to today (UTC) when no date is given. */
+export async function listSurgeries(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const dateParam = typeof req.query.date === "string" ? req.query.date : undefined;
+    const day = dateParam ? new Date(dateParam) : new Date();
+    if (Number.isNaN(day.getTime())) {
+      throw new ValidationError("date must be a valid date");
+    }
+    const dayStart = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    const surgeries = await OTSchedule.find({
+      scheduledStart: { $lt: dayEnd },
+      scheduledEnd: { $gt: dayStart },
+    })
+      .sort({ theatreRoom: 1, scheduledStart: 1 })
+      .populate("patientId", "uhid firstName lastName");
+
+    res.status(200).json({ data: surgeries });
+  } catch (err) {
+    next(err);
+  }
+}
 
 const TeamMemberSchema = z.object({
   userId: z.string().min(1),
@@ -115,6 +140,36 @@ export async function logSterilization(req: Request, res: Response, next: NextFu
     });
 
     res.status(201).json({ data: log });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const AllocateInstrumentSetSchema = z.object({ sterilizationLogId: z.string().min(1) }).strict();
+
+/** POST /api/ot/surgeries/:surgeryId/allocate-instruments — links a scheduled surgery to a PASS-verified sterilization cycle via `OTService.allocateInstrumentSet`. OT Coordinator only. */
+export async function allocateInstrumentSet(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError("Must be authenticated");
+    }
+
+    const { surgeryId } = req.params;
+    if (!surgeryId) {
+      throw new ValidationError("surgeryId route parameter is required");
+    }
+
+    const parsed = AllocateInstrumentSetSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ValidationError(formatZodError(parsed.error));
+    }
+
+    const surgery = await otService.allocateInstrumentSet({
+      surgeryId,
+      sterilizationLogId: parsed.data.sterilizationLogId,
+    });
+
+    res.status(200).json({ data: surgery });
   } catch (err) {
     next(err);
   }

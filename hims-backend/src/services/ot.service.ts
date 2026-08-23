@@ -7,7 +7,7 @@ import { SurgeryStatus } from "../types/common.types.js";
 import { generateSurgeryNumber, generateSterilizationCycleNumber } from "../utils/sequenceGenerator.js";
 import { toObjectId } from "../utils/objectId.js";
 import { firstOrThrow } from "../utils/assert.js";
-import { ValidationError, NotFoundError, ResourceUnavailableError } from "../utils/errors.js";
+import { ValidationError, NotFoundError, ConflictError, ResourceUnavailableError } from "../utils/errors.js";
 
 export interface ScheduleSurgeryInput {
   patientId: string;
@@ -22,6 +22,11 @@ export interface ScheduleSurgeryInput {
   anesthesiaType?: "GENERAL" | "REGIONAL" | "LOCAL" | "SEDATION" | "NONE";
   consentObtained?: boolean;
   performedByUserId: string;
+}
+
+export interface AllocateInstrumentSetInput {
+  surgeryId: string;
+  sterilizationLogId: string;
 }
 
 export interface LogSterilizationInstrumentSetInput {
@@ -50,14 +55,16 @@ const NON_BLOCKING_SURGERY_STATUSES: SurgeryStatus[] = [SurgeryStatus.CANCELLED,
 /** OT & Cath Lab scheduling and sterile-processing engine. */
 export class OTService {
   /**
-   * Books a theatre slot. The double-booking guard is a conflict query
-   * (same `theatreRoom`, a still-active booking whose window overlaps the
-   * requested one) followed by the `OTSchedule.create`, both inside one
-   * `withTransaction` call — snapshot isolation is what actually prevents
-   * two concurrent requests from both passing the conflict check and
-   * both creating overlapping bookings, since (unlike a single-document
-   * claim such as `ADTService.admitPatient`'s bed claim) there's no one
-   * row to conditionally update for a range-overlap check.
+   * Books a theatre slot. The double-booking guard is two conflict
+   * queries — same `theatreRoom`, then (Step 11) the same staff member in
+   * *any* room — each checking for a still-active booking whose window
+   * overlaps the requested one, followed by the `OTSchedule.create`, all
+   * inside one `withTransaction` call. Snapshot isolation is what
+   * actually prevents two concurrent requests from both passing the
+   * conflict check and both creating overlapping bookings, since (unlike
+   * a single-document claim such as `ADTService.admitPatient`'s bed
+   * claim) there's no one row to conditionally update for a range-overlap
+   * check.
    */
   async scheduleSurgery(input: ScheduleSurgeryInput): Promise<OTScheduleDocument> {
     const scheduledStart = new Date(input.scheduledStart);
@@ -101,6 +108,28 @@ export class OTService {
         throw new ResourceUnavailableError(
           `Theatre ${input.theatreRoom} is already booked for "${conflict.procedureName}" from ` +
             `${conflict.scheduledStart.toISOString()} to ${conflict.scheduledEnd.toISOString()}`,
+        );
+      }
+
+      // Step 11: staff-level conflict, independent of the room check above
+      // — a surgeon or anesthetist double-booked across two *different*
+      // rooms is exactly as unsafe as double-booking the room itself.
+      const teamUserIds = input.team.map((member) => member.userId);
+      const staffConflict = await OTSchedule.findOne({
+        "team.userId": { $in: teamUserIds },
+        status: { $nin: NON_BLOCKING_SURGERY_STATUSES },
+        scheduledStart: { $lt: scheduledEnd },
+        scheduledEnd: { $gt: scheduledStart },
+      })
+        .session(session)
+        .lean();
+
+      if (staffConflict) {
+        const clashingMember = staffConflict.team.find((member) => teamUserIds.includes(member.userId));
+        const ourMember = input.team.find((member) => member.userId === clashingMember?.userId);
+        throw new ResourceUnavailableError(
+          `${ourMember?.name ?? "A team member"} is already booked for "${staffConflict.procedureName}" in ` +
+            `${staffConflict.theatreRoom} from ${staffConflict.scheduledStart.toISOString()} to ${staffConflict.scheduledEnd.toISOString()}`,
         );
       }
 
@@ -191,6 +220,40 @@ export class OTService {
     });
 
     return log;
+  }
+
+  /**
+   * Links a scheduled surgery to the sterilization cycle its instruments
+   * came from — refusing the link outright if that cycle has zero
+   * PASS-eligible sets, so a surgery can never point at instruments that
+   * failed (or were never verified through) sterile processing. Single-
+   * document write on `OTSchedule` (the read of `SterilizationLog` is
+   * just a validation check, not something that needs to stay in sync).
+   */
+  async allocateInstrumentSet(input: AllocateInstrumentSetInput): Promise<OTScheduleDocument> {
+    const surgeryId = toObjectId(input.surgeryId, "surgeryId");
+    const sterilizationLogId = toObjectId(input.sterilizationLogId, "sterilizationLogId");
+
+    const [surgery, log] = await Promise.all([
+      OTSchedule.findById(surgeryId),
+      SterilizationLog.findById(sterilizationLogId).lean(),
+    ]);
+    if (!surgery) throw new NotFoundError(`Surgery ${input.surgeryId} not found`);
+    if (!log) throw new NotFoundError(`Sterilization cycle ${input.sterilizationLogId} not found`);
+
+    const eligibleSetCount = log.instrumentSets.filter((set) => set.cycleResult === "PASS").length;
+    if (eligibleSetCount === 0) {
+      throw new ConflictError(`Sterilization cycle ${log.cycleNumber} has no PASS-eligible instrument sets to allocate`);
+    }
+    if (surgery.status !== SurgeryStatus.SCHEDULED && surgery.status !== SurgeryStatus.CONFIRMED) {
+      throw new ConflictError(
+        `Surgery ${surgery.surgeryNumber} is ${surgery.status} and can no longer have instruments allocated`,
+      );
+    }
+
+    surgery.sterilizationLogId = log._id;
+    await surgery.save();
+    return surgery;
   }
 }
 

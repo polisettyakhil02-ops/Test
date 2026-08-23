@@ -8,6 +8,9 @@ import billingRoutes from "./billing.routes.js";
 import adminRoutes from "./admin.routes.js";
 import limsRoutes from "./lims.routes.js";
 import otRoutes from "./ot.routes.js";
+import assetRoutes from "./asset.routes.js";
+import payrollRoutes from "./payroll.routes.js";
+import insuranceRoutes from "./insurance.routes.js";
 
 /**
  * Main API router, mounted at "/api" by `app.ts`. `patientRoutes` spans
@@ -26,5 +29,8 @@ router.use("/billing", billingRoutes);
 router.use("/admin", adminRoutes);
 router.use("/lims", limsRoutes);
 router.use("/ot", otRoutes);
+router.use("/assets", assetRoutes);
+router.use("/payroll", payrollRoutes);
+router.use("/insurance", insuranceRoutes);
 
 export default router;

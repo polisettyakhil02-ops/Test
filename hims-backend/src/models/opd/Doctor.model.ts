@@ -1,5 +1,5 @@
 import { Schema, model, type Model, type HydratedDocument, type Types } from "mongoose";
-import { PHONE_REGEX, EMAIL_REGEX } from "../../types/common.types.js";
+import { PHONE_REGEX, EMAIL_REGEX, DoctorEmploymentType } from "../../types/common.types.js";
 
 export interface DoctorAttrs {
   userId: Types.ObjectId; // ref -> User (login identity lives in admin/User.model.ts)
@@ -16,6 +16,8 @@ export interface DoctorAttrs {
   followUpFee?: number;
   averageConsultationMinutes: number; // used to derive slot capacity
   signatureStorageKey?: string; // used on prescriptions/reports
+  /** Salaried in-house vs. fee-split visiting/retainer — the payroll module's RevenueShareRule lookup key (see services/payroll.service.ts). Defaults to IN_HOUSE for every doctor onboarded before Step 11. */
+  employmentType: DoctorEmploymentType;
   isActive: boolean;
 }
 
@@ -37,6 +39,12 @@ const DoctorSchema = new Schema<DoctorAttrs>(
     followUpFee: { type: Number, min: 0 },
     averageConsultationMinutes: { type: Number, required: true, default: 15, min: 1 },
     signatureStorageKey: { type: String },
+    employmentType: {
+      type: String,
+      required: true,
+      enum: Object.values(DoctorEmploymentType),
+      default: DoctorEmploymentType.IN_HOUSE,
+    },
     isActive: { type: Boolean, required: true, default: true },
   },
   { timestamps: true, collection: "doctors" },

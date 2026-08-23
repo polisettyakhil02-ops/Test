@@ -29,3 +29,7 @@ export const generateLabOrderNumber = (): Promise<string> => generateSequenceNum
 export const generateSpecimenBarcode = (): Promise<string> => generateSequenceNumber("SPEC", "specimen");
 export const generateSurgeryNumber = (): Promise<string> => generateSequenceNumber("OT", "surgery");
 export const generateSterilizationCycleNumber = (): Promise<string> => generateSequenceNumber("STZ", "sterilization");
+export const generateAssetCode = (): Promise<string> => generateSequenceNumber("BME", "asset", 5);
+export const generateMaintenanceTicketNumber = (): Promise<string> => generateSequenceNumber("MT", "maintenanceTicket");
+export const generatePayoutStatementNumber = (): Promise<string> => generateSequenceNumber("PAY", "payoutStatement");
+export const generatePreAuthNumber = (): Promise<string> => generateSequenceNumber("PA", "preAuth");

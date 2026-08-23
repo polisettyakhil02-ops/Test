@@ -42,6 +42,12 @@ export * from "./billing/Payment.model.js";
 export * from "./billing/InsurancePolicy.model.js";
 export * from "./billing/PreAuthorization.model.js";
 
+export * from "./assets/Asset.model.js";
+export * from "./assets/MaintenanceTicket.model.js";
+
+export * from "./payroll/RevenueShareRule.model.js";
+export * from "./payroll/PayoutStatement.model.js";
+
 export * from "./admin/Department.model.js";
 export * from "./admin/Role.model.js";
 export * from "./admin/User.model.js";
