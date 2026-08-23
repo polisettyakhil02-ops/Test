@@ -1,4 +1,5 @@
 import { Router } from "express";
+import authRoutes from "./auth.routes.js";
 import patientRoutes from "./patient.routes.js";
 import ipdRoutes from "./ipd.routes.js";
 import emrRoutes from "./emr.routes.js";
@@ -14,6 +15,7 @@ import adminRoutes from "./admin.routes.js";
  */
 const router = Router();
 
+router.use("/auth", authRoutes);
 router.use(patientRoutes);
 router.use("/ipd", ipdRoutes);
 router.use("/emr", emrRoutes);

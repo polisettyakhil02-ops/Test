@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-6)
+# HIMS Platform — Architecture Blueprint (Steps 1-7)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -155,7 +155,7 @@ pattern as they're added.
 
 Two deliberate deviations from the literal spec, both to keep the system correct rather than just matching field names: (1) `POST /api/ipd/admit` accepts `wardType` but cross-checks it against the target bed's actual ward category rather than using it to *set* the admission's ward — the bed's own `wardId` is what `ADTService.admitPatient` trusts, since a client-supplied ward could otherwise disagree with the bed being admitted into. (2) EMR write endpoints resolve the acting `doctorId` from the authenticated user's linked `Doctor` profile rather than trusting a `doctorId` in the request body, so one doctor's account can never write a note/prescription under another doctor's name.
 
-Not yet built: login/refresh-token-rotation service, LIMS/OT controllers & routes (not in this checkpoint's scope), repositories layer (not needed yet — no domain's data access has grown complex enough to warrant one).
+Not yet built at this checkpoint (login/refresh-token-rotation landed in Step 7 — see below): LIMS/OT controllers & routes (not in this checkpoint's scope), repositories layer (not needed yet — no domain's data access has grown complex enough to warrant one).
 
 ## Step 4 deliverables (this checkpoint)
 
@@ -168,12 +168,12 @@ New `hims-frontend/` client — React 18, Vite, TypeScript (strict, `noUnchecked
 - **`pages/billing/InvoiceView.tsx`** — categorized, print-friendly invoice; `usePayInvoice` writes the mutation result straight into the `activeInvoice` query cache, so the status badge flips to PAID/PARTIALLY_PAID with no refetch, per the spec.
 - **`hooks/`** — one TanStack Query hook file per API concern, exactly as asked (`useBeds`, `useAdmitPatient`, `usePatientTimeline`, plus every other read/mutation the four pages need).
 
-**Backend gaps this frontend is built against but hims-backend doesn't implement yet** (each marked `// BACKEND GAP:` at its one call site — `grep -rn "BACKEND GAP" hims-frontend/src`):
-1. `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/refresh`, `GET /api/auth/me` — blocks everything; Step 2/3 built the `User` model, bcrypt hashing, and JWT utils these would use, but never the routes themselves.
-2. `POST /api/ipd/:admissionId/discharge` + `GET /api/ipd/admissions/:admissionId` — needed by `BedManager`'s discharge button and occupied-bed drawer; the natural counterpart to `ADTService.admitPatient`.
-3. `GET /api/pharmacy/drugs?search=` — needed by the prescription builder's medication search.
+**Backend gaps this frontend is built against but hims-backend doesn't implement yet** (each marked `// BACKEND GAP:` at its one call site — `grep -rn "BACKEND GAP" hims-frontend/src`), **as of Step 4:**
+1. ~~`POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/refresh`, `GET /api/auth/me`~~ — **resolved in Step 7.** Step 2/3 built the `User` model, bcrypt hashing, and JWT utils these would use; Step 7 built the routes themselves.
+2. `POST /api/ipd/:admissionId/discharge` + `GET /api/ipd/admissions/:admissionId` — needed by `BedManager`'s discharge button and occupied-bed drawer; the natural counterpart to `ADTService.admitPatient`. Still open.
+3. `GET /api/pharmacy/drugs?search=` — needed by the prescription builder's medication search. Still open.
 
-None of the four pages requested are stubs — every hook makes a real, correctly-typed call to either a real Step 3 endpoint or one of the three gaps above, so each starts working the moment its endpoint lands.
+None of the four pages requested are stubs — every hook makes a real, correctly-typed call to either a real Step 3 endpoint or one of the gaps above, so each starts working the moment its endpoint lands.
 
 ## Step 5 deliverables (this checkpoint)
 
@@ -211,11 +211,41 @@ Staff, Patients, Wards/Beds, and the Audit Log, gated to
 
 Both `hims-backend` (`tsc --noEmit`) and `hims-frontend` (`tsc -b && vite build`) verify clean with these changes.
 
+## Step 7 deliverables (this checkpoint)
+
+Authentication Flow & Security Hardening — closes the single largest gap
+flagged by the Step 6 architecture review: until now, nothing in the
+system could actually log in.
+
+**Backend — `hims-backend/src/{services,controllers,routes}/auth.*`:**
+
+- **`services/auth.service.ts`** (`AuthService`, singleton-exported like every other domain service) —
+  - **`login`** — looks up `User` by username (`+passwordHash` explicitly selected, since it's `select: false` on the schema) and verifies via the model's own `comparePassword` (bcrypt). Enforces the brute-force lockout counter Step 1 built into `User` (`failedLoginAttempts`/`lockedUntil`) but never used until now: 5 consecutive failures locks the account for 15 minutes (`AccountLockedError`, HTTP 423). Every other failure path — unknown username, wrong password, deactivated/administratively-locked account — returns the same generic "Invalid username or password" (401) specifically to prevent username enumeration; only an *already*-triggered lockout is disclosed, since by then the caller has already confirmed the username exists through repeated attempts. On success, issues a fresh access/refresh token pair and joins the login identity to whichever of `Doctor`/`StaffProfile` (and, through it, `Department`) carries the human-facing name, matching the frontend's `AuthUser` contract exactly.
+  - **`refresh`** — full rotation with reuse-detection. Every refresh token is single-use: verifying it looks up its `RefreshToken` record by `jti`, and re-hashes the presented raw token to confirm it matches the stored SHA-256 (defense in depth beyond the JWT signature alone). A token already marked `isRevoked` — meaning it was already rotated past, or is a replay of a stolen token — triggers **family revocation**: every token sharing that `tokenFamilyId` is revoked and the whole session is forced back through a fresh login, rather than trusting any surviving sibling token. A legitimate refresh mints a new pair in the *same* family (so rotation doesn't look like a new "device" each time) and marks the presented token `ROTATED`.
+  - **`logout`** — revokes the presented session's entire token family (so a cached-but-unrotated token from the same device can't be replayed after logout) and is a no-op, not an error, if no valid session is presented — logging out twice must still succeed.
+  - **`getProfile`** — the `GET /api/auth/me` join, re-fetched live (not read off the JWT claims) so a display-name/department/role change is visible without waiting on the next token refresh — mirrors why `auth.middleware.ts` already re-fetches `User` on every request rather than trusting the JWT alone.
+  - Login/refresh-reuse/logout write directly to `AuditLog` with the dedicated `LOGIN`/`LOGIN_FAILED`/`LOGOUT` `AuditAction` values Step 1 reserved for exactly this and that had never actually been used — the generic route-level `auditLogger` middleware can't do this correctly here, since it derives the actor from `req.user`, which isn't set yet on `/login` and isn't meaningful on an already-expired `/refresh` call.
+- **`controllers/auth.controller.ts`** — zod-validated (`.strict()`) request bodies; sets/reads both tokens as `httpOnly`, `sameSite: "strict"` cookies (`secure` outside local dev), with the refresh cookie scoped to `path: "/api/auth"` only since nothing outside `/refresh`/`/logout` ever needs to see it. The access token is also returned in the JSON body on login/refresh so the SPA's in-memory token store has it immediately (see Step 4's `lib/tokenStore.ts`) without an extra round trip, and so non-cookie API clients still get a usable bearer token.
+- **`routes/auth.routes.ts`** — `POST /login`, `POST /refresh`, `POST /logout` (all public — a request without a valid session is exactly what these need to handle), `GET /me` (behind `protect`). Mounted at `/api/auth` in `routes/index.ts`.
+- **Two new `AppError` subclasses** in `utils/errors.ts`: `AccountLockedError` (423, temporary brute-force lockout) and `AccountDisabledError` (403, formalizing into the typed-error hierarchy the same "inactive or locked" condition `auth.middleware.ts` already handled ad hoc for already-issued tokens).
+
+**Application-layer rate limiting — `hims-backend/src/app.ts`:**
+
+Nginx's edge-level `/api/auth/` rate limiting (Step 5) is defense in depth, not a substitute — this app may not always run behind that specific Nginx config (a different load balancer, a direct deploy), so the limit now also lives in Express itself via `express-rate-limit`:
+- A **strict limiter** (5 requests / 15 min per IP) on the credential/token-exchange auth surface: `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`.
+- A **standard limiter** (300 requests / 15 min per IP) on the rest of `/api/*` — replacing the single blanket limiter that previously covered everything, including `/healthz`/`/readyz` (now correctly excluded, since orchestrator health probes shouldn't be throttled at all).
+- **`GET /api/auth/me` is deliberately on the standard limiter, not the strict one** — it's a read-only session check the frontend calls on every page load and new tab (see `AuthContext.tsx`'s bootstrap effect), has no credential-guessing surface (it either has a valid cookie or it doesn't), and a literal 5-per-15-minute cap on it would false-positive on ordinary multi-tab usage and silently log real users out. This is a deliberate, documented deviation from applying one uniform limiter to the entire `/api/auth/*` prefix, made to keep the feature actually usable rather than matching the literal path pattern.
+
+Combined with the per-account lockout in `AuthService.login`, brute-forcing now has to defeat both an IP-based rate limit *and* an account-based attempt counter — a distributed attacker spreading attempts across many IPs still trips the account lockout; a single-IP attacker trips the rate limiter long before the account lockout would even matter.
+
+Both `tsc --noEmit` and `npm run build` verify clean with these changes; no placeholder logic anywhere in the new auth surface.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
 - [x] **Step 2** — Auth + RBAC middleware, audit interceptor, Pharmacy Dispensation Engine, Bed ADT Engine (both ACID)
-- [x] **Step 3 (partial)** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: login/refresh-token-rotation service, LIMS + OT controllers/routes.
-- [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. Blocked end-to-end only by the auth routes and two smaller gaps listed above.
-- [x] **Step 5** — Docker, Nginx, production hosting guide. The stack builds and deploys today; going live still needs the Step 3 auth routes (`docker compose up` will happily run a HIMS instance nobody can log into until then).
+- [x] **Step 3** — App/router wiring, error handler, OPD/EMR/Billing services, controllers+routes for Patient/OPD, IPD/ADT, EMR, Pharmacy, Billing. Remaining: LIMS + OT controllers/routes (out of scope so far).
+- [x] **Step 4** — Frontend: role-based shell, EMR workspace, bed grid, invoicing UI. As of Step 7, no longer blocked by missing auth routes — two smaller endpoint gaps remain (discharge, drug search).
+- [x] **Step 5** — Docker, Nginx, production hosting guide. The stack builds and deploys today; as of Step 7, a fresh deploy can actually be logged into.
 - [x] **Step 6** — Master Admin Control Center: global Staff/Patient/Ward/Audit-Log directory and CRUD, gated to `SUPER_ADMIN`/`HOSPITAL_ADMIN`, including ACID patient-record merging.
+- [x] **Step 7** — Authentication flow (login/refresh-rotation-with-reuse-detection/logout/me) and application-layer rate limiting. Resolves the single largest gap called out by the Step 6 architecture review: the system is now actually usable end-to-end, not just built end-to-end.

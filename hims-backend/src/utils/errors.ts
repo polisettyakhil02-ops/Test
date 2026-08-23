@@ -29,6 +29,20 @@ export class AuthenticationError extends AppError {
   }
 }
 
+/** Raised when an account is temporarily locked out after too many consecutive failed login attempts (see auth.service.ts). */
+export class AccountLockedError extends AppError {
+  constructor(message: string) {
+    super(message, 423, "ACCOUNT_LOCKED");
+  }
+}
+
+/** Raised when an account is deactivated or administratively locked — the AppError-hierarchy counterpart to the ad hoc 403 auth.middleware.ts returns for the same condition on already-issued tokens. */
+export class AccountDisabledError extends AppError {
+  constructor(message: string) {
+    super(message, 403, "ACCOUNT_DISABLED");
+  }
+}
+
 export class ForbiddenError extends AppError {
   constructor(message: string) {
     super(message, 403, "FORBIDDEN");

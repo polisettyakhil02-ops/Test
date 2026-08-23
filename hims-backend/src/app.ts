@@ -36,14 +36,40 @@ export function createApp(): Express {
   app.use(cookieParser(env.COOKIE_SECRET));
   app.use(pinoHttp());
 
-  app.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      limit: 300,
-      standardHeaders: true,
-      legacyHeaders: false,
-    }),
-  );
+  // Strict brute-force guard on the credential/token-exchange auth
+  // surface (login, refresh, logout). GET /api/auth/me is deliberately
+  // excluded from this bucket — it's a read-only session check the
+  // frontend calls on every page load/new tab (see hims-frontend's
+  // AuthContext bootstrap effect and its proactive-refresh timer), has
+  // no credential-guessing surface at all (it either has a valid cookie
+  // or it doesn't), and would false-positive on ordinary multi-tab usage
+  // under a 5-per-15-minute cap; it falls through to the standard
+  // limiter below instead. Nginx (docker/nginx/default.conf) adds a
+  // second, edge-level limiter on /api/auth/ in front of this one in the
+  // Docker Compose topology — defense in depth, not a substitute for
+  // this one, since the app may also run directly behind a different
+  // load balancer that doesn't have that config.
+  const authRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", message: "Too many authentication attempts. Please try again later." },
+  });
+  app.use(["/api/auth/login", "/api/auth/refresh", "/api/auth/logout"], authRateLimiter);
+
+  const standardApiRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", message: "Too many requests. Please try again later." },
+    // The three auth paths above already carry the stricter limiter above;
+    // skip them here so a request is only ever charged against one
+    // counter instead of two.
+    skip: (req) => ["/auth/login", "/auth/refresh", "/auth/logout"].includes(req.path),
+  });
+  app.use("/api", standardApiRateLimiter);
 
   app.get("/healthz", (_req, res) => {
     res.status(200).json({ status: "ok" });
