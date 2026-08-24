@@ -22,6 +22,7 @@ import { RadiologyWorklist } from "@/pages/radiology/RadiologyWorklist";
 import { RadiologyReportEditor } from "@/pages/radiology/RadiologyReportEditor";
 import { IvfEmrPanel } from "@/pages/specialty_emr/IvfEmrPanel";
 import { ObstetricEmrPanel } from "@/pages/specialty_emr/ObstetricEmrPanel";
+import { PediatricEmrPanel } from "@/pages/specialty_emr/PediatricEmrPanel";
 import { DmoHandoverBoard } from "@/pages/specialty_emr/DmoHandoverBoard";
 import { MrdFileTracker } from "@/pages/mrd/MrdFileTracker";
 import { IcdCodingQueue } from "@/pages/mrd/IcdCodingQueue";
@@ -124,6 +125,7 @@ export default function App() {
           <Route element={<ProtectedRoute roles={SPECIALTY_EMR_ROLES} />}>
             <Route path="specialty-emr/ivf" element={<IvfEmrPanel />} />
             <Route path="specialty-emr/obstetric" element={<ObstetricEmrPanel />} />
+            <Route path="specialty-emr/pediatric" element={<PediatricEmrPanel />} />
             <Route path="specialty-emr/dmo" element={<DmoHandoverBoard />} />
           </Route>
 

@@ -408,6 +408,9 @@ export const LiquorColor = {
 } as const;
 export type LiquorColor = (typeof LiquorColor)[keyof typeof LiquorColor];
 
+export const VaccinationDoseStatus = { DUE: "DUE", ADMINISTERED: "ADMINISTERED", MISSED: "MISSED", SKIPPED: "SKIPPED" } as const;
+export type VaccinationDoseStatus = (typeof VaccinationDoseStatus)[keyof typeof VaccinationDoseStatus];
+
 export const DmoCriticalityLevel = { WATCH: "WATCH", URGENT: "URGENT", CRITICAL: "CRITICAL" } as const;
 export type DmoCriticalityLevel = (typeof DmoCriticalityLevel)[keyof typeof DmoCriticalityLevel];
 

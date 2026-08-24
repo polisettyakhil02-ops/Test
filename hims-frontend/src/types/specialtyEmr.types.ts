@@ -9,6 +9,7 @@ import type {
   LiquorColor,
   Gender,
   DialysisShift,
+  VaccinationDoseStatus,
   DmoCriticalityLevel,
   DmoHandoverStatus,
 } from "./common.types";
@@ -18,6 +19,7 @@ export interface SpecialtyPatientSummary {
   uhid: string;
   firstName: string;
   lastName: string;
+  dateOfBirth?: string;
 }
 export interface SpecialtyDoctorSummary {
   _id: string;
@@ -161,6 +163,59 @@ export interface CreateObstetricRecordPayload {
   para: number;
   abortions?: number;
   livingChildren?: number;
+}
+
+/* ============================================================================
+ * Pediatric EMR
+ * ==========================================================================*/
+
+export interface VaccinationDose {
+  vaccineName: string;
+  doseNumber: number;
+  dueDate: string;
+  administeredDate?: string;
+  batchNumber?: string;
+  administeredByUserId?: string;
+  status: VaccinationDoseStatus;
+}
+
+export interface GrowthChartEntry {
+  recordedAt: string;
+  ageInMonths: number;
+  weightKg: number;
+  heightCm: number;
+  headCircumferenceCm?: number;
+  recordedByUserId: string;
+}
+
+/** Mirrors PediatricRecord.model.ts — patientId/pediatricianId arrive populated. */
+export interface PediatricRecord {
+  _id: string;
+  recordNumber: string;
+  patientId: SpecialtyPatientSummary | string;
+  pediatricianId: SpecialtyDoctorSummary | string;
+  vaccinationSchedule: VaccinationDose[];
+  growthChartEntries: GrowthChartEntry[];
+  allergyNotes?: string;
+}
+
+export interface CreatePediatricRecordPayload {
+  patientId: string;
+  pediatricianId: string;
+}
+
+export interface RecordVaccineAdministeredPayload {
+  vaccineName: string;
+  doseNumber: number;
+  administeredDate: string;
+  batchNumber: string;
+}
+
+export interface AddGrowthChartEntryPayload {
+  recordedAt: string;
+  weightKg: number;
+  heightCm: number;
+  headCircumferenceCm?: number;
 }
 
 /* ============================================================================

@@ -11,6 +11,10 @@ import type {
   AncVisit,
   PartographReading,
   DeliveryDetails,
+  PediatricRecord,
+  CreatePediatricRecordPayload,
+  RecordVaccineAdministeredPayload,
+  AddGrowthChartEntryPayload,
   DmoHandoverNote,
   CreateDmoHandoverNotePayload,
 } from "@/types/specialtyEmr.types";
@@ -169,6 +173,70 @@ export function useDischargePostnatal(recordId: string) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: OBSTETRIC_KEY }),
   });
 }
+
+/* ============================================================================
+ * Pediatric EMR
+ * ==========================================================================*/
+
+const PEDIATRIC_KEY = ["specialtyEmr", "pediatric"] as const;
+
+export function usePediatricRecords(filters: { patientId?: string } = {}) {
+  return useQuery({
+    queryKey: [...PEDIATRIC_KEY, filters],
+    queryFn: async () => {
+      const response = await api.get<ApiEnvelope<PediatricRecord[]>>("/specialty-emr/pediatric/records", { params: filters });
+      return response.data.data;
+    },
+  });
+}
+
+export function usePediatricRecord(recordId: string | undefined) {
+  return useQuery({
+    queryKey: [...PEDIATRIC_KEY, "detail", recordId],
+    queryFn: async () => {
+      const response = await api.get<ApiEnvelope<PediatricRecord>>(`/specialty-emr/pediatric/records/${recordId}`);
+      return response.data.data;
+    },
+    enabled: Boolean(recordId),
+  });
+}
+
+export function useCreatePediatricRecord() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: CreatePediatricRecordPayload) => {
+      const response = await api.post<ApiEnvelope<PediatricRecord>>("/specialty-emr/pediatric/records", payload);
+      return response.data.data;
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: PEDIATRIC_KEY }),
+  });
+}
+
+/** Same hook-free-factory reasoning as `useIvfCycleAction` above. */
+function usePediatricRecordAction<TPayload>(path: (recordId: string) => string) {
+  return (recordId: string) => {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: async (payload: TPayload) => {
+        const response = await api.post<ApiEnvelope<PediatricRecord>>(path(recordId), payload);
+        return response.data.data;
+      },
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: PEDIATRIC_KEY });
+      },
+    });
+  };
+}
+
+export const useRecordVaccineAdministered = usePediatricRecordAction<RecordVaccineAdministeredPayload>(
+  (recordId) => `/specialty-emr/pediatric/records/${recordId}/vaccinations/administer`,
+);
+export const useSkipPediatricDose = usePediatricRecordAction<{ vaccineName: string; doseNumber: number }>(
+  (recordId) => `/specialty-emr/pediatric/records/${recordId}/vaccinations/skip`,
+);
+export const useAddGrowthChartEntry = usePediatricRecordAction<AddGrowthChartEntryPayload>(
+  (recordId) => `/specialty-emr/pediatric/records/${recordId}/growth-entries`,
+);
 
 /* ============================================================================
  * DMO Handover

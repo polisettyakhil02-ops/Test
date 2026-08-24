@@ -102,6 +102,12 @@ export const NAV_ITEMS: NavItem[] = [
     roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DOCTOR, SystemRole.HEAD_NURSE, SystemRole.STAFF_NURSE],
   },
   {
+    label: "Pediatric EMR",
+    path: "/specialty-emr/pediatric",
+    icon: "🧒",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DOCTOR, SystemRole.HEAD_NURSE, SystemRole.STAFF_NURSE],
+  },
+  {
     label: "DMO Handover",
     path: "/specialty-emr/dmo",
     icon: "🌙",

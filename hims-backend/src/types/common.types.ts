@@ -567,6 +567,14 @@ export enum LiquorColor {
   ABSENT = "ABSENT",
 }
 
+/** One dose's lifecycle on a child's vaccination schedule. */
+export enum VaccinationDoseStatus {
+  DUE = "DUE",
+  ADMINISTERED = "ADMINISTERED",
+  MISSED = "MISSED",
+  SKIPPED = "SKIPPED", // e.g. medically contraindicated
+}
+
 export enum DmoCriticalityLevel {
   WATCH = "WATCH",
   URGENT = "URGENT",

@@ -11,15 +11,27 @@ import {
 } from "../models/specialty_emr/ObstetricRecord.model.js";
 import { DmoHandoverNote, type DmoHandoverNoteDocument } from "../models/specialty_emr/DmoHandoverNote.model.js";
 import {
+  PediatricRecord,
+  type PediatricRecordDocument,
+  type VaccinationDose,
+  type GrowthChartEntry,
+} from "../models/specialty_emr/PediatricRecord.model.js";
+import {
   IvfProtocolType,
   IvfCycleStatus,
   FertilizationMethod,
   ObstetricRecordStatus,
+  VaccinationDoseStatus,
   DialysisShift,
   DmoCriticalityLevel,
   DmoHandoverStatus,
 } from "../types/common.types.js";
-import { generateIvfCycleNumber, generateObstetricRecordNumber, generateDmoHandoverNoteNumber } from "../utils/sequenceGenerator.js";
+import {
+  generateIvfCycleNumber,
+  generateObstetricRecordNumber,
+  generatePediatricRecordNumber,
+  generateDmoHandoverNoteNumber,
+} from "../utils/sequenceGenerator.js";
 import { toObjectId } from "../utils/objectId.js";
 import { NotFoundError, ValidationError, ConflictError } from "../utils/errors.js";
 
@@ -427,6 +439,159 @@ export class DmoHandoverService {
   }
 }
 
+/* ============================================================================
+ * Pediatric EMR
+ * ==========================================================================*/
+
+const MS_PER_DAY_PED = 24 * 60 * 60 * 1000;
+
+/**
+ * A standard childhood immunization schedule (WHO/national-programme
+ * style), expressed as days-of-age each dose falls due. Seeded onto a new
+ * `PediatricRecord` from the patient's own `dateOfBirth` so the schedule
+ * exists with real due dates from day one, rather than the ward having to
+ * hand-enter every dose.
+ */
+const STANDARD_IMMUNIZATION_SCHEDULE: { vaccineName: string; doseNumber: number; dueAgeInDays: number }[] = [
+  { vaccineName: "BCG", doseNumber: 1, dueAgeInDays: 0 },
+  { vaccineName: "Hepatitis B", doseNumber: 1, dueAgeInDays: 0 },
+  { vaccineName: "OPV", doseNumber: 1, dueAgeInDays: 0 },
+  { vaccineName: "OPV", doseNumber: 2, dueAgeInDays: 42 },
+  { vaccineName: "DPT", doseNumber: 1, dueAgeInDays: 42 },
+  { vaccineName: "OPV", doseNumber: 3, dueAgeInDays: 70 },
+  { vaccineName: "DPT", doseNumber: 2, dueAgeInDays: 70 },
+  { vaccineName: "OPV", doseNumber: 4, dueAgeInDays: 98 },
+  { vaccineName: "DPT", doseNumber: 3, dueAgeInDays: 98 },
+  { vaccineName: "Measles", doseNumber: 1, dueAgeInDays: 270 },
+  { vaccineName: "DPT Booster", doseNumber: 1, dueAgeInDays: 548 },
+  { vaccineName: "Measles", doseNumber: 2, dueAgeInDays: 548 },
+];
+
+function ageInMonthsAt(dateOfBirth: Date, at: Date): number {
+  const days = (at.getTime() - dateOfBirth.getTime()) / MS_PER_DAY_PED;
+  return Math.round((days / 30.44) * 10) / 10;
+}
+
+export interface CreatePediatricRecordInput {
+  patientId: string;
+  pediatricianId: string;
+  performedByUserId: string;
+}
+
+export interface RecordVaccineAdministeredInput {
+  recordId: string;
+  vaccineName: string;
+  doseNumber: number;
+  administeredDate: string;
+  batchNumber: string;
+  performedByUserId: string;
+}
+
+export class PediatricService {
+  async createRecord(input: CreatePediatricRecordInput): Promise<PediatricRecordDocument> {
+    const patient = await requirePatient(input.patientId);
+    await requireDoctor(input.pediatricianId, "pediatricianId");
+
+    const existing = await PediatricRecord.findOne({ patientId: patient._id }).lean();
+    if (existing) throw new ConflictError(`Patient already has a Pediatric EMR record: ${existing.recordNumber}`);
+
+    const dateOfBirth = patient.dateOfBirth;
+    const vaccinationSchedule: VaccinationDose[] = STANDARD_IMMUNIZATION_SCHEDULE.map((entry) => ({
+      vaccineName: entry.vaccineName,
+      doseNumber: entry.doseNumber,
+      dueDate: new Date(dateOfBirth.getTime() + entry.dueAgeInDays * MS_PER_DAY_PED),
+      status: VaccinationDoseStatus.DUE,
+    }));
+
+    const recordNumber = await generatePediatricRecordNumber();
+    return PediatricRecord.create({
+      recordNumber,
+      patientId: patient._id,
+      pediatricianId: toObjectId(input.pediatricianId, "pediatricianId"),
+      vaccinationSchedule,
+      growthChartEntries: [],
+      createdBy: input.performedByUserId,
+    });
+  }
+
+  private async getRecord(recordId: string): Promise<PediatricRecordDocument> {
+    const record = await PediatricRecord.findById(toObjectId(recordId, "recordId"));
+    if (!record) throw new NotFoundError(`Pediatric record ${recordId} not found`);
+    return record;
+  }
+
+  async recordVaccineAdministered(input: RecordVaccineAdministeredInput) {
+    const record = await this.getRecord(input.recordId);
+    const dose = record.vaccinationSchedule.find(
+      (d) => d.vaccineName === input.vaccineName && d.doseNumber === input.doseNumber,
+    );
+    if (!dose) throw new NotFoundError(`${input.vaccineName} dose ${input.doseNumber} is not on this child's schedule`);
+    if (dose.status === VaccinationDoseStatus.ADMINISTERED) {
+      throw new ConflictError(`${input.vaccineName} dose ${input.doseNumber} is already recorded as administered`);
+    }
+
+    dose.administeredDate = new Date(input.administeredDate);
+    dose.batchNumber = input.batchNumber;
+    dose.administeredByUserId = input.performedByUserId;
+    dose.status = VaccinationDoseStatus.ADMINISTERED;
+    await record.save();
+    return record;
+  }
+
+  async skipDose(recordId: string, vaccineName: string, doseNumber: number) {
+    const record = await this.getRecord(recordId);
+    const dose = record.vaccinationSchedule.find((d) => d.vaccineName === vaccineName && d.doseNumber === doseNumber);
+    if (!dose) throw new NotFoundError(`${vaccineName} dose ${doseNumber} is not on this child's schedule`);
+    if (dose.status === VaccinationDoseStatus.ADMINISTERED) {
+      throw new ConflictError(`${vaccineName} dose ${doseNumber} is already administered`);
+    }
+    dose.status = VaccinationDoseStatus.SKIPPED;
+    await record.save();
+    return record;
+  }
+
+  async addGrowthChartEntry(
+    recordId: string,
+    entry: { recordedAt: string; weightKg: number; heightCm: number; headCircumferenceCm?: number },
+    performedByUserId: string,
+  ) {
+    const record = await this.getRecord(recordId);
+    const patient = await Patient.findById(record.patientId).lean();
+    if (!patient) throw new NotFoundError(`Patient ${record.patientId.toString()} not found`);
+
+    const recordedAt = new Date(entry.recordedAt);
+    const growthEntry: GrowthChartEntry = {
+      recordedAt,
+      ageInMonths: ageInMonthsAt(patient.dateOfBirth, recordedAt),
+      weightKg: entry.weightKg,
+      heightCm: entry.heightCm,
+      headCircumferenceCm: entry.headCircumferenceCm,
+      recordedByUserId: performedByUserId,
+    };
+    record.growthChartEntries.push(growthEntry);
+    await record.save();
+    return record;
+  }
+
+  async listRecords(filters: { patientId?: string } = {}) {
+    const query: Record<string, unknown> = {};
+    if (filters.patientId) query.patientId = toObjectId(filters.patientId, "patientId");
+    return PediatricRecord.find(query)
+      .sort({ createdAt: -1 })
+      .populate("patientId", "uhid firstName lastName dateOfBirth")
+      .populate("pediatricianId", "fullName");
+  }
+
+  async getRecordForClient(recordId: string) {
+    const record = await PediatricRecord.findById(toObjectId(recordId, "recordId"))
+      .populate("patientId", "uhid firstName lastName dateOfBirth")
+      .populate("pediatricianId", "fullName");
+    if (!record) throw new NotFoundError(`Pediatric record ${recordId} not found`);
+    return record;
+  }
+}
+
 export const ivfService = new IvfService();
 export const obstetricService = new ObstetricService();
+export const pediatricService = new PediatricService();
 export const dmoHandoverService = new DmoHandoverService();

@@ -22,6 +22,12 @@ import {
   addPartographReading,
   recordDelivery,
   dischargePostnatal,
+  createPediatricRecord,
+  listPediatricRecords,
+  getPediatricRecord,
+  recordVaccineAdministered,
+  skipPediatricDose,
+  addGrowthChartEntry,
   createDmoHandoverNote,
   listDmoHandoverNotes,
   acknowledgeDmoHandoverNote,
@@ -59,6 +65,13 @@ router.post("/obstetric/records/:recordId/anc-visits", auditLogger("WRITE", "Obs
 router.post("/obstetric/records/:recordId/partograph", auditLogger("WRITE", "ObstetricRecord"), addPartographReading);
 router.post("/obstetric/records/:recordId/delivery", auditLogger("WRITE", "ObstetricRecord"), recordDelivery);
 router.post("/obstetric/records/:recordId/discharge", auditLogger("WRITE", "ObstetricRecord"), dischargePostnatal);
+
+router.post("/pediatric/records", auditLogger("WRITE", "PediatricRecord"), createPediatricRecord);
+router.get("/pediatric/records", auditLogger("READ", "PediatricRecord"), listPediatricRecords);
+router.get("/pediatric/records/:recordId", auditLogger("READ", "PediatricRecord"), getPediatricRecord);
+router.post("/pediatric/records/:recordId/vaccinations/administer", auditLogger("WRITE", "PediatricRecord"), recordVaccineAdministered);
+router.post("/pediatric/records/:recordId/vaccinations/skip", auditLogger("WRITE", "PediatricRecord"), skipPediatricDose);
+router.post("/pediatric/records/:recordId/growth-entries", auditLogger("WRITE", "PediatricRecord"), addGrowthChartEntry);
 
 router.post("/dmo/notes", auditLogger("WRITE", "DmoHandoverNote"), createDmoHandoverNote);
 router.get("/dmo/notes", auditLogger("READ", "DmoHandoverNote"), listDmoHandoverNotes);

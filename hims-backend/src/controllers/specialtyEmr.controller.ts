@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { ivfService, obstetricService, dmoHandoverService } from "../services/specialtyEmr.service.js";
+import { ivfService, obstetricService, pediatricService, dmoHandoverService } from "../services/specialtyEmr.service.js";
 import {
   IvfProtocolType,
   IvfCycleStatus,
@@ -376,6 +376,103 @@ export async function dischargePostnatal(req: Request, res: Response, next: Next
     const { recordId } = req.params;
     if (!recordId) throw new ValidationError("recordId route parameter is required");
     const record = await obstetricService.dischargePostnatal(recordId);
+    res.status(200).json({ data: record });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/* ============================================================================
+ * Pediatric EMR
+ * ==========================================================================*/
+
+const CreatePediatricRecordSchema = z.object({ patientId: z.string().min(1), pediatricianId: z.string().min(1) });
+
+export async function createPediatricRecord(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const performedByUserId = requireUser(req);
+    const parsed = CreatePediatricRecordSchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(formatZodError(parsed.error));
+    const record = await pediatricService.createRecord({ ...parsed.data, performedByUserId });
+    res.status(201).json({ data: record });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listPediatricRecords(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const patientId = typeof req.query.patientId === "string" ? req.query.patientId : undefined;
+    const records = await pediatricService.listRecords({ patientId });
+    res.status(200).json({ data: records });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getPediatricRecord(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { recordId } = req.params;
+    if (!recordId) throw new ValidationError("recordId route parameter is required");
+    const record = await pediatricService.getRecordForClient(recordId);
+    res.status(200).json({ data: record });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const RecordVaccineSchema = z.object({
+  vaccineName: z.string().min(1),
+  doseNumber: z.number().int().min(1),
+  administeredDate: z.string().min(1),
+  batchNumber: z.string().min(1),
+});
+
+export async function recordVaccineAdministered(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const performedByUserId = requireUser(req);
+    const { recordId } = req.params;
+    if (!recordId) throw new ValidationError("recordId route parameter is required");
+    const parsed = RecordVaccineSchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(formatZodError(parsed.error));
+    const record = await pediatricService.recordVaccineAdministered({ recordId, ...parsed.data, performedByUserId });
+    res.status(200).json({ data: record });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const SkipDoseSchema = z.object({ vaccineName: z.string().min(1), doseNumber: z.number().int().min(1) });
+
+export async function skipPediatricDose(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    requireUser(req);
+    const { recordId } = req.params;
+    if (!recordId) throw new ValidationError("recordId route parameter is required");
+    const parsed = SkipDoseSchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(formatZodError(parsed.error));
+    const record = await pediatricService.skipDose(recordId, parsed.data.vaccineName, parsed.data.doseNumber);
+    res.status(200).json({ data: record });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const AddGrowthEntrySchema = z.object({
+  recordedAt: z.string().min(1),
+  weightKg: z.number().min(0).max(200),
+  heightCm: z.number().min(0).max(250),
+  headCircumferenceCm: z.number().min(0).max(100).optional(),
+});
+
+export async function addGrowthChartEntry(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const performedByUserId = requireUser(req);
+    const { recordId } = req.params;
+    if (!recordId) throw new ValidationError("recordId route parameter is required");
+    const parsed = AddGrowthEntrySchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(formatZodError(parsed.error));
+    const record = await pediatricService.addGrowthChartEntry(recordId, parsed.data, performedByUserId);
     res.status(200).json({ data: record });
   } catch (err) {
     next(err);
