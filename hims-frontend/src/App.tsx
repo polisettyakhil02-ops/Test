@@ -16,6 +16,10 @@ import { AuditInspector } from "@/pages/admin/AuditInspector";
 import { ERTriageBoard } from "@/pages/emergency/ERTriageBoard";
 import { BloodBankInventory } from "@/pages/bloodbank/BloodBankInventory";
 import { DialysisScheduler } from "@/pages/dialysis/DialysisScheduler";
+import { PhlebotomyCollectionStation } from "@/pages/phlebotomy/PhlebotomyCollectionStation";
+import { PhlebotomyQueueBoard } from "@/pages/phlebotomy/PhlebotomyQueueBoard";
+import { RadiologyWorklist } from "@/pages/radiology/RadiologyWorklist";
+import { RadiologyReportEditor } from "@/pages/radiology/RadiologyReportEditor";
 import { SystemRole } from "@/types/common.types";
 
 const IPD_ROLES = [
@@ -40,6 +44,8 @@ const EMERGENCY_ROLES = [
 ];
 const BLOODBANK_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.BLOOD_BANK_TECHNICIAN, SystemRole.DOCTOR];
 const DIALYSIS_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DIALYSIS_TECHNICIAN, SystemRole.DOCTOR];
+const PHLEBOTOMY_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.PHLEBOTOMIST, SystemRole.LAB_TECHNICIAN];
+const RADIOLOGY_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.RADIOLOGY_TECHNICIAN, SystemRole.DOCTOR];
 
 export default function App() {
   return (
@@ -80,6 +86,15 @@ export default function App() {
             <Route path="dialysis" element={<DialysisScheduler />} />
           </Route>
 
+          <Route element={<ProtectedRoute roles={PHLEBOTOMY_ROLES} />}>
+            <Route path="phlebotomy" element={<PhlebotomyCollectionStation />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={RADIOLOGY_ROLES} />}>
+            <Route path="radiology" element={<RadiologyWorklist />} />
+            <Route path="radiology/report/:orderId" element={<RadiologyReportEditor />} />
+          </Route>
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>
@@ -95,6 +110,11 @@ export default function App() {
           <Route path="audit-logs" element={<AuditInspector />} />
           <Route path="*" element={<Navigate to="/admin/staff" replace />} />
         </Route>
+      </Route>
+
+      {/* TV-style waiting-room board — deliberately outside DashboardLayout, same reasoning as AdminLayout: it renders its own full-screen shell with no sidebar chrome, since it's meant for an unattended kiosk display. */}
+      <Route element={<ProtectedRoute roles={PHLEBOTOMY_ROLES} />}>
+        <Route path="/phlebotomy/board" element={<PhlebotomyQueueBoard />} />
       </Route>
     </Routes>
   );

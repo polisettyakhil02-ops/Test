@@ -78,6 +78,18 @@ export const NAV_ITEMS: NavItem[] = [
     roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DIALYSIS_TECHNICIAN, SystemRole.DOCTOR],
   },
   {
+    label: "Phlebotomy Queue",
+    path: "/phlebotomy",
+    icon: "🩹",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.PHLEBOTOMIST, SystemRole.LAB_TECHNICIAN],
+  },
+  {
+    label: "Radiology Worklist",
+    path: "/radiology",
+    icon: "🩻",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.RADIOLOGY_TECHNICIAN, SystemRole.DOCTOR],
+  },
+  {
     label: "Admin Console",
     path: "/admin",
     icon: "⚙",

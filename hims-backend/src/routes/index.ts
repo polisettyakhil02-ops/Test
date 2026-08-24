@@ -14,6 +14,8 @@ import insuranceRoutes from "./insurance.routes.js";
 import emergencyRoutes from "./emergency.routes.js";
 import bloodbankRoutes from "./bloodbank.routes.js";
 import dialysisRoutes from "./dialysis.routes.js";
+import phlebotomyRoutes from "./phlebotomy.routes.js";
+import radiologyRoutes from "./radiology.routes.js";
 
 /**
  * Main API router, mounted at "/api" by `app.ts`. `patientRoutes` spans
@@ -38,5 +40,7 @@ router.use("/insurance", insuranceRoutes);
 router.use("/emergency", emergencyRoutes);
 router.use("/bloodbank", bloodbankRoutes);
 router.use("/dialysis", dialysisRoutes);
+router.use("/phlebotomy", phlebotomyRoutes);
+router.use("/radiology", radiologyRoutes);
 
 export default router;

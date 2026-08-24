@@ -51,6 +51,8 @@ export enum SystemRole {
   ER_NURSE = "ER_NURSE",
   BLOOD_BANK_TECHNICIAN = "BLOOD_BANK_TECHNICIAN",
   DIALYSIS_TECHNICIAN = "DIALYSIS_TECHNICIAN",
+  PHLEBOTOMIST = "PHLEBOTOMIST",
+  RADIOLOGY_TECHNICIAN = "RADIOLOGY_TECHNICIAN",
 }
 
 export enum PermissionAction {
@@ -467,6 +469,27 @@ export enum VascularAccessType {
   AV_GRAFT = "AV_GRAFT",
   CENTRAL_VENOUS_CATHETER = "CENTRAL_VENOUS_CATHETER",
   OTHER = "OTHER",
+}
+
+/* ============================================================================
+ * Step 13 — Advanced Diagnostics & Sample Collection (Radiology/RIS).
+ * Phlebotomy needs no new enums: it operates entirely on the existing
+ * `Specimen`/`SpecimenStatus` and `LabOrder`/`LabOrderStatus` vocabulary
+ * from Step 8 — see phlebotomy.service.ts's doc comment for why.
+ * ==========================================================================*/
+
+export enum RadiologyOrderStatus {
+  ORDERED = "ORDERED",
+  SCHEDULED = "SCHEDULED",
+  IN_PROGRESS = "IN_PROGRESS",
+  COMPLETED = "COMPLETED",
+  REPORTED = "REPORTED",
+  CANCELLED = "CANCELLED",
+}
+
+export enum RadiologyReportStatus {
+  DRAFT = "DRAFT",
+  FINALIZED = "FINALIZED",
 }
 
 export const ICD10_CODE_REGEX = /^[A-TV-Z][0-9][0-9AB](\.[0-9A-TV-Z]{1,4})?$/;

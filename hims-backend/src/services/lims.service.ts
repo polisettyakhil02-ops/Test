@@ -6,7 +6,7 @@ import { LabTest, type ReferenceRange } from "../models/lims/LabTest.model.js";
 import { LabOrder, type LabOrderDocument, type LabOrderTestLine } from "../models/lims/LabOrder.model.js";
 import { Specimen, type SpecimenDocument } from "../models/lims/Specimen.model.js";
 import { LabResult, type LabResultDocument, type ResultParameter } from "../models/lims/LabResult.model.js";
-import { EncounterType, LabOrderPriority, LabOrderStatus, ResultFlag, Gender } from "../types/common.types.js";
+import { EncounterType, LabOrderPriority, LabOrderStatus, SpecimenStatus, ResultFlag, Gender } from "../types/common.types.js";
 import { generateLabOrderNumber, generateSpecimenBarcode } from "../utils/sequenceGenerator.js";
 import { toObjectId } from "../utils/objectId.js";
 import { firstOrThrow } from "../utils/assert.js";
@@ -48,6 +48,16 @@ export interface SubmitLabResultInput {
 export interface SubmitLabResultResult {
   order: LabOrderDocument;
   result: LabResultDocument;
+}
+
+export interface ReceiveSpecimenInput {
+  barcodeValue: string;
+  performedByUserId: string;
+}
+
+export interface ReceiveSpecimenResult {
+  specimen: SpecimenDocument;
+  order: LabOrderDocument;
 }
 
 /** Age in whole years as of `at` (defaults to now) — used to select the correct age-banded reference range. */
@@ -271,6 +281,66 @@ export class LIMSService {
   }
 
   /**
+   * Step 13: the Laboratory's own intake step — the far side of
+   * `PhlebotomyService.collectSpecimen`. A specimen a phlebotomist has
+   * physically drawn (`COLLECTED`) doesn't count as "in the lab" until
+   * someone at the bench actually receives it, so this is a distinct
+   * transition, not folded into `collectSpecimen`: the two happen at
+   * different desks, often minutes to hours apart, and `submitLabResult`
+   * below refuses to accept a result until this step has run. Same
+   * transactional shape as `collectSpecimen` — the `Specimen` and every
+   * `LabOrderTestLine` sharing it advance together.
+   */
+  async receiveSpecimen(input: ReceiveSpecimenInput): Promise<ReceiveSpecimenResult> {
+    if (!input.barcodeValue?.trim()) {
+      throw new ValidationError("barcodeValue is required");
+    }
+
+    return withTransaction(async (session) => {
+      const specimen = await Specimen.findOne({ barcodeValue: input.barcodeValue.trim() }).session(session);
+      if (!specimen) {
+        throw new NotFoundError(`No specimen found for barcode "${input.barcodeValue}"`);
+      }
+      if (specimen.status !== SpecimenStatus.COLLECTED) {
+        throw new ConflictError(
+          `Specimen ${specimen.barcodeValue} is ${specimen.status}, not COLLECTED — it must be collected before the lab can receive it`,
+        );
+      }
+
+      specimen.status = SpecimenStatus.RECEIVED;
+      specimen.receivedAt = new Date();
+      specimen.receivedByUserId = input.performedByUserId;
+      await specimen.save({ session });
+
+      const order = await LabOrder.findById(specimen.labOrderId).session(session);
+      if (!order) {
+        throw new NotFoundError(`Lab order ${specimen.labOrderId.toString()} not found for specimen ${specimen.barcodeValue}`);
+      }
+
+      const lines = order.tests as unknown as Array<LabOrderTestLine & { _id: Types.ObjectId }>;
+      for (const line of lines) {
+        if (line.specimenId?.toString() === specimen._id.toString() && line.status === LabOrderStatus.SAMPLE_COLLECTED) {
+          line.status = LabOrderStatus.IN_LAB;
+        }
+      }
+
+      const inLabOrLater: LabOrderStatus[] = [
+        LabOrderStatus.IN_LAB,
+        LabOrderStatus.RESULT_ENTERED,
+        LabOrderStatus.VERIFIED,
+        LabOrderStatus.REPORTED,
+      ];
+      const allLinesInLabOrLater = order.tests.every((t) => inLabOrLater.includes(t.status));
+      if (allLinesInLabOrLater && order.status === LabOrderStatus.SAMPLE_COLLECTED) {
+        order.status = LabOrderStatus.IN_LAB;
+      }
+      await order.save({ session });
+
+      return { specimen, order };
+    });
+  }
+
+  /**
    * Enters a result for one test line: compares each submitted parameter
    * against the sex/age-appropriate `LabTest.referenceRanges` band and
    * derives its flag (see `determineFlag`/`selectReferenceRange` above),
@@ -315,10 +385,20 @@ export class LIMSService {
         throw new ConflictError(`No specimen is linked to ${line.testName} on order ${order.orderNumber}`);
       }
 
-      const [labTest, patient] = await Promise.all([
+      const [labTest, patient, specimen] = await Promise.all([
         LabTest.findById(line.labTestId).session(session).lean(),
         Patient.findById(order.patientId).session(session).lean(),
+        Specimen.findById(line.specimenId).session(session).lean(),
       ]);
+      // Step 13: the barcode-scan gate — a result can never be entered for
+      // a specimen phlebotomy hasn't collected and the lab hasn't received,
+      // closing the loop this step's request describes ("...before it
+      // reaches the Laboratory module").
+      if (!specimen || specimen.status !== SpecimenStatus.RECEIVED) {
+        throw new ConflictError(
+          `Specimen for ${line.testName} has not been received in the lab yet (current status: ${specimen?.status ?? "unknown"}) — it must be collected and received before a result can be entered`,
+        );
+      }
       if (!labTest) {
         throw new NotFoundError(`Lab test ${line.labTestId.toString()} no longer exists`);
       }

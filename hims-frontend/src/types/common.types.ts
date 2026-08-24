@@ -24,6 +24,8 @@ export const SystemRole = {
   ER_NURSE: "ER_NURSE",
   BLOOD_BANK_TECHNICIAN: "BLOOD_BANK_TECHNICIAN",
   DIALYSIS_TECHNICIAN: "DIALYSIS_TECHNICIAN",
+  PHLEBOTOMIST: "PHLEBOTOMIST",
+  RADIOLOGY_TECHNICIAN: "RADIOLOGY_TECHNICIAN",
 } as const;
 export type SystemRole = (typeof SystemRole)[keyof typeof SystemRole];
 
@@ -285,6 +287,62 @@ export const VascularAccessType = {
   OTHER: "OTHER",
 } as const;
 export type VascularAccessType = (typeof VascularAccessType)[keyof typeof VascularAccessType];
+
+/* ============================================================================
+ * Step 13 — Advanced Diagnostics & Sample Collection (Phlebotomy/RIS).
+ * First frontend use of the LIMS/Asset vocabulary, so it's mirrored here
+ * for the first time too.
+ * ==========================================================================*/
+
+export const LabOrderPriority = {
+  ROUTINE: "ROUTINE",
+  URGENT: "URGENT",
+  STAT: "STAT",
+} as const;
+export type LabOrderPriority = (typeof LabOrderPriority)[keyof typeof LabOrderPriority];
+
+export const SpecimenStatus = {
+  PENDING_COLLECTION: "PENDING_COLLECTION",
+  COLLECTED: "COLLECTED",
+  IN_TRANSIT: "IN_TRANSIT",
+  RECEIVED: "RECEIVED",
+  REJECTED: "REJECTED",
+  DISPOSED: "DISPOSED",
+} as const;
+export type SpecimenStatus = (typeof SpecimenStatus)[keyof typeof SpecimenStatus];
+
+/** Only the imaging subset of the backend's full `AssetCategory` — the rest (ventilators, infusion pumps, ...) isn't relevant to Radiology. */
+export const ImagingModality = {
+  XRAY: "XRAY",
+  CT_SCAN: "CT_SCAN",
+  MRI: "MRI",
+  ULTRASOUND: "ULTRASOUND",
+} as const;
+export type ImagingModality = (typeof ImagingModality)[keyof typeof ImagingModality];
+
+export const AssetStatus = {
+  ACTIVE: "ACTIVE",
+  UNDER_MAINTENANCE: "UNDER_MAINTENANCE",
+  AWAITING_PARTS: "AWAITING_PARTS",
+  DECOMMISSIONED: "DECOMMISSIONED",
+} as const;
+export type AssetStatus = (typeof AssetStatus)[keyof typeof AssetStatus];
+
+export const RadiologyOrderStatus = {
+  ORDERED: "ORDERED",
+  SCHEDULED: "SCHEDULED",
+  IN_PROGRESS: "IN_PROGRESS",
+  COMPLETED: "COMPLETED",
+  REPORTED: "REPORTED",
+  CANCELLED: "CANCELLED",
+} as const;
+export type RadiologyOrderStatus = (typeof RadiologyOrderStatus)[keyof typeof RadiologyOrderStatus];
+
+export const RadiologyReportStatus = {
+  DRAFT: "DRAFT",
+  FINALIZED: "FINALIZED",
+} as const;
+export type RadiologyReportStatus = (typeof RadiologyReportStatus)[keyof typeof RadiologyReportStatus];
 
 /** Every API response's envelope shape (see hims-backend controllers: `res.json({ data: ... })`). */
 export interface ApiEnvelope<T> {

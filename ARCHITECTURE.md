@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-12)
+# HIMS Platform — Architecture Blueprint (Steps 1-13)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -337,7 +337,7 @@ existing `ot.service.ts`.
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`) verify clean. Part 2 — the interactive artifact preview covering these four modules — is a separate deliverable in this same conversation, not a file in this repository.
 
-## Step 12 deliverables — High-Acuity & Specialized Clinical Modules (this checkpoint)
+## Step 12 deliverables — High-Acuity & Specialized Clinical Modules
 
 Emergency/ER + Emergency EMR, Blood Bank, and Dialysis + Nephrology EMR —
 backend and frontend both, for all three. Same directory-convention note
@@ -375,6 +375,31 @@ in spirit as `src/models/emergency/`, `src/services/emergency.service.ts`,
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
+## Step 13 deliverables — Advanced Diagnostics & Sample Collection (this checkpoint)
+
+Phlebotomy & Queue Management, and Radiology & RIS — backend and frontend
+both. Same directory-convention note as Steps 11-12: the request's
+`src/modules/phlebotomy/` / `src/modules/radiology/` paths are followed in
+spirit as the established flat convention instead.
+
+**Phlebotomy & Queue Management — `services/phlebotomy.service.ts`, `pages/phlebotomy/`:**
+
+- **No new schema.** `LIMSService.createLabOrder` (Step 8) already generates a barcoded `Specimen` — `PENDING_COLLECTION` by default — the instant a doctor orders a lab test, and `SpecimenStatus`/`LabOrderStatus` already carry every state this module needs. A parallel `SampleCollection` collection would just be `Specimen` under a different name with nothing new to track — the same call Step 9 made not to build a second OT schedule, made explicit here since the request's own wording asked for a new schema. `phlebotomyService.collectSpecimen` is this module's one real mutation (`PENDING_COLLECTION` → `COLLECTED`, transactional across the `Specimen` and every `LabOrderTestLine` sharing its barcode, plus the owning `LabOrder`'s own status); queue/label reads live directly in the controller, mirroring how `lims.controller.ts#listLabOrders` already queries `LabOrder` directly rather than through a service passthrough.
+- **The literal gate closed**: `LIMSService.receiveSpecimen` (new) is the Laboratory's own intake step — `COLLECTED` → `RECEIVED` — and `submitLabResult` now refuses to accept a result unless the specimen backing it is `RECEIVED`. That's what "the phlebotomist must scan/enter this barcode to mark the sample as Collected before it reaches the Laboratory module" actually means enforced in code: a result can never be entered for a specimen nobody scanned in at either end.
+- **Frontend** — `PhlebotomyQueueBoard.tsx`: a dark, large-type, zero-interaction TV dashboard for the waiting room (auto-refreshing, no buttons at all, deliberately outside `DashboardLayout` the same way `AdminLayout` renders its own shell — a kiosk display shouldn't show the app's sidebar). `PhlebotomyCollectionStation.tsx`: the technician's working screen — print a specimen's label (a real `window.open` + `window.print()` call against a generated label document, with a deterministic bar pattern rendered from the barcode's own characters since no barcode-rendering library is a project dependency) and scan/type the same barcode back in to collect it.
+
+**Radiology & RIS — `models/radiology/`, `services/radiology.service.ts`, `pages/radiology/`:**
+
+- `RadiologyOrder.model.ts` reuses `AssetCategory` for `modality` (Step 11's biomedical registry already models `XRAY`/`CT_SCAN`/`MRI`/`ULTRASOUND` as tracked devices — no parallel enum) and `LabOrderPriority` for triage (the same STAT/URGENT/ROUTINE vocabulary applies). `RadiologyReport.model.ts` is `findings`/`impression`, split from the order the same way `LabResult` is split from `LabOrder` — an independent draft-vs-finalized state machine.
+- `scheduleOrder` — assigns a machine + time, checking the asset is actually the ordered modality and currently `ACTIVE`, the same machine-fitness check `DialysisService.scheduleDialysisSession` runs.
+- `getModalityWorklist` — mimics a DICOM Modality Worklist: the JSON a physical scanner's console would auto-populate a patient from, keyed by accession number, with field names following the real DICOM MWL attributes they represent (`PatientName` as `Family^Given`, `PatientSex` as a single-letter code). It's a REST/JSON stand-in, not a real MWL SCP — an actual modality speaks the DICOM C-FIND protocol over its own network service, which is a different protocol entirely from HTTP and (per the request's own wording, "mimics") out of scope here.
+- `finalizeReport` — the module's one multi-collection transaction: locks the report and advances its order to `REPORTED` atomically, requiring non-empty findings/impression and, mirroring `LabResult`'s critical-value rule, a recorded notification target before a critical finding can be locked in.
+- **Frontend** — `RadiologyWorklist.tsx`: technicians schedule/start/complete studies; `RadiologyReportEditor.tsx` is the split-screen — patient history on the left is literally `PatientHistoryPanel`, the same component `DoctorDesk` uses (a radiologist's context need is identical, not a bespoke panel), the typed findings/impression editor with autosave and finalize on the right.
+
+**New RBAC roles:** `PHLEBOTOMIST`, `RADIOLOGY_TECHNICIAN` added to `SystemRole` (both `hims-backend` and the mirrored `hims-frontend` enum, which also gains its first-ever mirror of `LabOrderPriority`/`SpecimenStatus`/`RadiologyOrderStatus`/`RadiologyReportStatus`/the imaging `AssetCategory` subset, since this is the first frontend work touching LIMS or Assets at all). `phlebotomy.routes.ts` and `radiology.routes.ts` each use one shared router-level gate, the established pattern for a cohesive desk.
+
+Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
@@ -389,3 +414,4 @@ Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc 
 - [x] **Step 10** — Frontend optimization (Vite `manualChunks` code-splitting, resolving the bundle-size warning) and the RBAC permission-matrix editor (`RoleManagement.tsx`). The editor is built against `GET/PUT /api/admin/roles*` endpoints that don't exist yet — a new `// BACKEND GAP`, tracked the same way Step 4's gaps were until Steps 7–8 closed them.
 - [x] **Step 11 (Part 1: backend)** — Enterprise ERP & Advanced Clinical Modules: Biomedical Asset/AMC management, doctor payroll/revenue-share statements, TPA/insurance claim settlement (closing another Step-1-schema-no-service gap, like Step 9 did for LIMS/OT), and an OT scheduling extension (cross-room staff conflict detection, sterile instrument-set allocation). Two new RBAC roles: `BIOMEDICAL_ENGINEER`, `TPA_OFFICER`. Part 2 (interactive artifact preview) is delivered in-conversation, not as a repo file.
 - [x] **Step 12** — High-Acuity & Specialized Clinical Modules, backend *and* frontend: Emergency/ER (triage board, ABCDE Emergency EMR, one-click ER→IPD admission as a single ACID transaction), Blood Bank (donor/bag/cross-match, with a dispense guard that rejects an unmatched or expired unit in code), and Dialysis/Nephrology (machine-conflict-checked scheduler + post-dialysis chart, reusing the Step 11 biomedical `Asset` registry for machines). Three new RBAC roles: `ER_NURSE`, `BLOOD_BANK_TECHNICIAN`, `DIALYSIS_TECHNICIAN`.
+- [x] **Step 13** — Advanced Diagnostics & Sample Collection, backend *and* frontend: Phlebotomy & Queue Management (no new schema — closes the barcode-collection gate on the existing Step 8 `Specimen`/`LabOrder` state machine, adding `LIMSService.receiveSpecimen` and a hard `submitLabResult` guard, plus a TV waiting-room board and a technician print/scan station) and Radiology & RIS (`RadiologyOrder`/`RadiologyReport`, a DICOM-Modality-Worklist-mimicking JSON endpoint, a machine scheduler reusing the OT/Dialysis conflict-guard pattern, and a split-screen report editor reusing the EMR's own `PatientHistoryPanel`). Two new RBAC roles: `PHLEBOTOMIST`, `RADIOLOGY_TECHNICIAN`.

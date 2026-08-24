@@ -38,3 +38,4 @@ export const generateDonorCode = (): Promise<string> => generateSequenceNumber("
 export const generateBloodBagNumber = (): Promise<string> => generateSequenceNumber("BAG", "bloodBag");
 export const generateCrossMatchRequestNumber = (): Promise<string> => generateSequenceNumber("XM", "crossMatchRequest");
 export const generateDialysisSessionNumber = (): Promise<string> => generateSequenceNumber("DLS", "dialysisSession");
+export const generateRadiologyOrderNumber = (): Promise<string> => generateSequenceNumber("RAD", "radiologyOrder");

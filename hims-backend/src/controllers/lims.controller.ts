@@ -97,6 +97,33 @@ export async function listLabOrders(req: Request, res: Response, next: NextFunct
   }
 }
 
+const ReceiveSpecimenSchema = z.object({ barcodeValue: z.string().min(1) }).strict();
+
+/**
+ * POST /api/lims/specimens/receive — the lab bench's intake scan, via
+ * `LIMSService.receiveSpecimen`. Lab Technician only; this is what
+ * unblocks `submitLabResult` for every test line sharing the barcode.
+ */
+export async function receiveSpecimen(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError("Must be authenticated");
+    }
+    const parsed = ReceiveSpecimenSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ValidationError(formatZodError(parsed.error));
+    }
+
+    const result = await limsService.receiveSpecimen({
+      barcodeValue: parsed.data.barcodeValue,
+      performedByUserId: req.user.id,
+    });
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 const SubmitLabResultParameterSchema = z.object({
   parameterName: z.string().min(1).max(200),
   value: z.string().min(1).max(500),

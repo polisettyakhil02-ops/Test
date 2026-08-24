@@ -65,3 +65,6 @@ export * from "./bloodbank/BloodBag.model.js";
 export * from "./bloodbank/CrossMatchRequest.model.js";
 
 export * from "./dialysis/DialysisSession.model.js";
+
+export * from "./radiology/RadiologyOrder.model.js";
+export * from "./radiology/RadiologyReport.model.js";
