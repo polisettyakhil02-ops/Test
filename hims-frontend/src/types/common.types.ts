@@ -21,6 +21,9 @@ export const SystemRole = {
   PATIENT: "PATIENT",
   BIOMEDICAL_ENGINEER: "BIOMEDICAL_ENGINEER",
   TPA_OFFICER: "TPA_OFFICER",
+  ER_NURSE: "ER_NURSE",
+  BLOOD_BANK_TECHNICIAN: "BLOOD_BANK_TECHNICIAN",
+  DIALYSIS_TECHNICIAN: "DIALYSIS_TECHNICIAN",
 } as const;
 export type SystemRole = (typeof SystemRole)[keyof typeof SystemRole];
 
@@ -184,6 +187,104 @@ export const AuditAction = {
   PERMISSION_DENIED: "PERMISSION_DENIED",
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
+
+/* ============================================================================
+ * Step 12 — Emergency/ER, Blood Bank, Dialysis & Nephrology
+ * ==========================================================================*/
+
+export const TriagePriority = {
+  RED: "RED",
+  YELLOW: "YELLOW",
+  GREEN: "GREEN",
+  BLACK: "BLACK",
+} as const;
+export type TriagePriority = (typeof TriagePriority)[keyof typeof TriagePriority];
+
+export const ERVisitStatus = {
+  WAITING: "WAITING",
+  IN_TREATMENT: "IN_TREATMENT",
+  ADMITTED: "ADMITTED",
+  DISCHARGED: "DISCHARGED",
+  LAMA: "LAMA",
+  DECEASED: "DECEASED",
+  TRANSFERRED_OUT: "TRANSFERRED_OUT",
+} as const;
+export type ERVisitStatus = (typeof ERVisitStatus)[keyof typeof ERVisitStatus];
+
+export const ERArrivalMode = {
+  AMBULANCE: "AMBULANCE",
+  WALK_IN: "WALK_IN",
+  POLICE: "POLICE",
+  REFERRAL: "REFERRAL",
+  OTHER: "OTHER",
+} as const;
+export type ERArrivalMode = (typeof ERArrivalMode)[keyof typeof ERArrivalMode];
+
+export const ERBayType = {
+  BED: "BED",
+  CRASH_CART: "CRASH_CART",
+  RESUS_BAY: "RESUS_BAY",
+} as const;
+export type ERBayType = (typeof ERBayType)[keyof typeof ERBayType];
+
+export const AirwayStatus = {
+  PATENT: "PATENT",
+  COMPROMISED: "COMPROMISED",
+  INTUBATED: "INTUBATED",
+} as const;
+export type AirwayStatus = (typeof AirwayStatus)[keyof typeof AirwayStatus];
+
+export const BloodComponentType = {
+  WHOLE_BLOOD: "WHOLE_BLOOD",
+  PRBC: "PRBC",
+  FFP: "FFP",
+  PLATELETS: "PLATELETS",
+  CRYOPRECIPITATE: "CRYOPRECIPITATE",
+} as const;
+export type BloodComponentType = (typeof BloodComponentType)[keyof typeof BloodComponentType];
+
+export const BloodBagStatus = {
+  AVAILABLE: "AVAILABLE",
+  RESERVED: "RESERVED",
+  ISSUED: "ISSUED",
+  DISCARDED: "DISCARDED",
+  EXPIRED: "EXPIRED",
+} as const;
+export type BloodBagStatus = (typeof BloodBagStatus)[keyof typeof BloodBagStatus];
+
+export const CrossMatchStatus = {
+  PENDING: "PENDING",
+  COMPATIBLE: "COMPATIBLE",
+  INCOMPATIBLE: "INCOMPATIBLE",
+  FULFILLED: "FULFILLED",
+  CANCELLED: "CANCELLED",
+} as const;
+export type CrossMatchStatus = (typeof CrossMatchStatus)[keyof typeof CrossMatchStatus];
+
+export const DialysisShift = {
+  MORNING: "MORNING",
+  AFTERNOON: "AFTERNOON",
+  EVENING: "EVENING",
+  NIGHT: "NIGHT",
+} as const;
+export type DialysisShift = (typeof DialysisShift)[keyof typeof DialysisShift];
+
+export const DialysisSessionStatus = {
+  SCHEDULED: "SCHEDULED",
+  IN_PROGRESS: "IN_PROGRESS",
+  COMPLETED: "COMPLETED",
+  CANCELLED: "CANCELLED",
+  ABORTED: "ABORTED",
+} as const;
+export type DialysisSessionStatus = (typeof DialysisSessionStatus)[keyof typeof DialysisSessionStatus];
+
+export const VascularAccessType = {
+  AV_FISTULA: "AV_FISTULA",
+  AV_GRAFT: "AV_GRAFT",
+  CENTRAL_VENOUS_CATHETER: "CENTRAL_VENOUS_CATHETER",
+  OTHER: "OTHER",
+} as const;
+export type VascularAccessType = (typeof VascularAccessType)[keyof typeof VascularAccessType];
 
 /** Every API response's envelope shape (see hims-backend controllers: `res.json({ data: ... })`). */
 export interface ApiEnvelope<T> {

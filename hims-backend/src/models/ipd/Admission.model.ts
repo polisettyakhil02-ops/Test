@@ -28,6 +28,8 @@ export interface AdmissionAttrs {
   finalDiagnosis?: string;
   bedMovementHistory: BedMovementRecord[];
   referredFromOPDVisitId?: Types.ObjectId;
+  /** Step 12: set when this admission originated from the ER Triage Board's one-click convert action — see `emergency.service.ts#convertToIpdAdmission`, the sole writer. Mutually exclusive with `referredFromOPDVisitId` in practice (a stay starts from OPD or the ER, not both), but not schema-enforced since nothing downstream depends on that invariant. */
+  referredFromErVisitId?: Types.ObjectId;
   insurancePreAuthId?: Types.ObjectId; // ref -> billing/PreAuthorization
   dischargeSummaryId?: Types.ObjectId;
   guardianConsentObtained: boolean;
@@ -66,6 +68,7 @@ const AdmissionSchema = new Schema<AdmissionAttrs>(
     finalDiagnosis: { type: String, trim: true, maxlength: 1000 },
     bedMovementHistory: { type: [BedMovementRecordSchema], default: [] },
     referredFromOPDVisitId: { type: Schema.Types.ObjectId, ref: "OPDVisit" },
+    referredFromErVisitId: { type: Schema.Types.ObjectId, ref: "ERVisit" },
     insurancePreAuthId: { type: Schema.Types.ObjectId, ref: "PreAuthorization" },
     dischargeSummaryId: { type: Schema.Types.ObjectId, ref: "DischargeSummary" },
     guardianConsentObtained: { type: Boolean, required: true, default: false },

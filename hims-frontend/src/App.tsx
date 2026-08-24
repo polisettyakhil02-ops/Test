@@ -13,6 +13,9 @@ import { RoleManagement } from "@/pages/admin/RoleManagement";
 import { PatientDirectory } from "@/pages/admin/PatientDirectory";
 import { InfrastructureMaster } from "@/pages/admin/InfrastructureMaster";
 import { AuditInspector } from "@/pages/admin/AuditInspector";
+import { ERTriageBoard } from "@/pages/emergency/ERTriageBoard";
+import { BloodBankInventory } from "@/pages/bloodbank/BloodBankInventory";
+import { DialysisScheduler } from "@/pages/dialysis/DialysisScheduler";
 import { SystemRole } from "@/types/common.types";
 
 const IPD_ROLES = [
@@ -27,6 +30,16 @@ const EMR_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.DOCTOR];
 const PHARMACY_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.PHARMACIST];
 const BILLING_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.BILLING_EXECUTIVE];
 const ADMIN_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN];
+const EMERGENCY_ROLES = [
+  SystemRole.SUPER_ADMIN,
+  SystemRole.HOSPITAL_ADMIN,
+  SystemRole.ER_NURSE,
+  SystemRole.DOCTOR,
+  SystemRole.HEAD_NURSE,
+  SystemRole.RECEPTIONIST,
+];
+const BLOODBANK_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.BLOOD_BANK_TECHNICIAN, SystemRole.DOCTOR];
+const DIALYSIS_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DIALYSIS_TECHNICIAN, SystemRole.DOCTOR];
 
 export default function App() {
   return (
@@ -53,6 +66,18 @@ export default function App() {
           <Route element={<ProtectedRoute roles={BILLING_ROLES} />}>
             <Route path="billing" element={<InvoiceView />} />
             <Route path="billing/:uhid" element={<InvoiceView />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={EMERGENCY_ROLES} />}>
+            <Route path="emergency" element={<ERTriageBoard />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={BLOODBANK_ROLES} />}>
+            <Route path="bloodbank" element={<BloodBankInventory />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={DIALYSIS_ROLES} />}>
+            <Route path="dialysis" element={<DialysisScheduler />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

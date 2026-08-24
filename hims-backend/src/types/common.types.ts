@@ -47,6 +47,10 @@ export enum SystemRole {
   PATIENT = "PATIENT",
   BIOMEDICAL_ENGINEER = "BIOMEDICAL_ENGINEER",
   TPA_OFFICER = "TPA_OFFICER",
+  /** Step 12: front-line ER triage/treatment role — kept distinct from STAFF_NURSE the same way LAB_TECHNICIAN/BIOMEDICAL_ENGINEER are split out from generic clinical roles, since the ER desk's route gates are its own permission scope. */
+  ER_NURSE = "ER_NURSE",
+  BLOOD_BANK_TECHNICIAN = "BLOOD_BANK_TECHNICIAN",
+  DIALYSIS_TECHNICIAN = "DIALYSIS_TECHNICIAN",
 }
 
 export enum PermissionAction {
@@ -374,6 +378,95 @@ export interface AuditableFields {
   updatedBy?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/* ============================================================================
+ * Step 12 — Emergency/ER, Blood Bank, Dialysis & Nephrology
+ * ==========================================================================*/
+
+/** START/ESI-style colour triage, in acuity order (RED highest). BLACK covers both expectant and deceased-on-arrival — this build doesn't split them further since neither changes how the ER desk operates on the case. */
+export enum TriagePriority {
+  RED = "RED", // Immediate / life-threatening
+  YELLOW = "YELLOW", // Urgent, can wait briefly
+  GREEN = "GREEN", // Non-urgent, walking wounded
+  BLACK = "BLACK", // Deceased or expectant
+}
+
+export enum ERVisitStatus {
+  WAITING = "WAITING",
+  IN_TREATMENT = "IN_TREATMENT",
+  ADMITTED = "ADMITTED",
+  DISCHARGED = "DISCHARGED",
+  LAMA = "LAMA",
+  DECEASED = "DECEASED",
+  TRANSFERRED_OUT = "TRANSFERRED_OUT",
+}
+
+export enum ERArrivalMode {
+  AMBULANCE = "AMBULANCE",
+  WALK_IN = "WALK_IN",
+  POLICE = "POLICE",
+  REFERRAL = "REFERRAL",
+  OTHER = "OTHER",
+}
+
+/** ER's fast-churn resources are modeled separately from `Bed`/`Ward` (see `ERBay.model.ts`) — a crash cart isn't a ward bed, and ER turnover/lifecycle doesn't match the IPD housekeeping flow `Bed` is built around. Status reuses `BedStatus` since the vocabulary (VACANT/OCCUPIED/CLEANING/MAINTENANCE/BLOCKED/RESERVED) is identical. */
+export enum ERBayType {
+  BED = "BED",
+  CRASH_CART = "CRASH_CART",
+  RESUS_BAY = "RESUS_BAY",
+}
+
+export enum AirwayStatus {
+  PATENT = "PATENT",
+  COMPROMISED = "COMPROMISED",
+  INTUBATED = "INTUBATED",
+}
+
+export enum BloodComponentType {
+  WHOLE_BLOOD = "WHOLE_BLOOD",
+  PRBC = "PRBC", // Packed Red Blood Cells
+  FFP = "FFP", // Fresh Frozen Plasma
+  PLATELETS = "PLATELETS",
+  CRYOPRECIPITATE = "CRYOPRECIPITATE",
+}
+
+export enum BloodBagStatus {
+  AVAILABLE = "AVAILABLE",
+  RESERVED = "RESERVED", // held against a COMPATIBLE CrossMatchRequest, not yet issued
+  ISSUED = "ISSUED",
+  DISCARDED = "DISCARDED",
+  EXPIRED = "EXPIRED",
+}
+
+export enum CrossMatchStatus {
+  PENDING = "PENDING",
+  COMPATIBLE = "COMPATIBLE",
+  INCOMPATIBLE = "INCOMPATIBLE",
+  FULFILLED = "FULFILLED", // every reserved unit has been issued
+  CANCELLED = "CANCELLED",
+}
+
+export enum DialysisShift {
+  MORNING = "MORNING",
+  AFTERNOON = "AFTERNOON",
+  EVENING = "EVENING",
+  NIGHT = "NIGHT",
+}
+
+export enum DialysisSessionStatus {
+  SCHEDULED = "SCHEDULED",
+  IN_PROGRESS = "IN_PROGRESS",
+  COMPLETED = "COMPLETED",
+  CANCELLED = "CANCELLED",
+  ABORTED = "ABORTED", // started but ended early (clotting, hypotension, access failure, etc.)
+}
+
+export enum VascularAccessType {
+  AV_FISTULA = "AV_FISTULA",
+  AV_GRAFT = "AV_GRAFT",
+  CENTRAL_VENOUS_CATHETER = "CENTRAL_VENOUS_CATHETER",
+  OTHER = "OTHER",
 }
 
 export const ICD10_CODE_REGEX = /^[A-TV-Z][0-9][0-9AB](\.[0-9A-TV-Z]{1,4})?$/;

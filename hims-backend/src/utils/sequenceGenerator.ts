@@ -33,3 +33,8 @@ export const generateAssetCode = (): Promise<string> => generateSequenceNumber("
 export const generateMaintenanceTicketNumber = (): Promise<string> => generateSequenceNumber("MT", "maintenanceTicket");
 export const generatePayoutStatementNumber = (): Promise<string> => generateSequenceNumber("PAY", "payoutStatement");
 export const generatePreAuthNumber = (): Promise<string> => generateSequenceNumber("PA", "preAuth");
+export const generateErVisitNumber = (): Promise<string> => generateSequenceNumber("ER", "erVisit");
+export const generateDonorCode = (): Promise<string> => generateSequenceNumber("DON", "bloodDonor", 6);
+export const generateBloodBagNumber = (): Promise<string> => generateSequenceNumber("BAG", "bloodBag");
+export const generateCrossMatchRequestNumber = (): Promise<string> => generateSequenceNumber("XM", "crossMatchRequest");
+export const generateDialysisSessionNumber = (): Promise<string> => generateSequenceNumber("DLS", "dialysisSession");

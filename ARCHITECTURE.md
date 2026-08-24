@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-11)
+# HIMS Platform — Architecture Blueprint (Steps 1-12)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -337,6 +337,44 @@ existing `ot.service.ts`.
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`) verify clean. Part 2 — the interactive artifact preview covering these four modules — is a separate deliverable in this same conversation, not a file in this repository.
 
+## Step 12 deliverables — High-Acuity & Specialized Clinical Modules (this checkpoint)
+
+Emergency/ER + Emergency EMR, Blood Bank, and Dialysis + Nephrology EMR —
+backend and frontend both, for all three. Same directory-convention note
+as Step 11: the request's `src/modules/emergency/` etc. paths are followed
+in spirit as `src/models/emergency/`, `src/services/emergency.service.ts`,
+`src/controllers/emergency.controller.ts`, `src/routes/emergency.routes.ts`
+— the flat convention every prior step uses — and likewise on the frontend
+(`src/pages/emergency/`, `src/hooks/useEmergency.ts`, `src/types/emergency.types.ts`).
+
+**Emergency / ER — `models/emergency/`, `services/emergency.service.ts`, `pages/emergency/`:**
+
+- `ERBay.model.ts` — the ER's own fast-churn resource pool (crash carts, resus bays, ER-side beds), deliberately **not** a `Bed`/`Ward` row: `Bed` is built around IPD's admit→discharge→housekeeping lifecycle, while an ER bay turns over in minutes with no ward/rate concept. Status reuses `BedStatus` since the vocabulary is identical, and claiming one is the same `findOneAndUpdate`-with-status-filter guard `ADTService.admitPatient` uses for beds.
+- `ERVisit.model.ts` — one row per ED encounter: `triagePriority` (RED/YELLOW/GREEN/BLACK), MLC fields (`isMedicoLegalCase`/`mlcNumber`/`policeStationName`) as flags on the visit rather than a separate collection (an MLC is a property of the visit, not an independent lifecycle), and `dispositionAdmissionId` — set only by the one-click IPD conversion below.
+- `EmergencyEMR.model.ts` — an append-only ABCDE (Airway/Breathing/Circulation/Disability/Exposure) primary-assessment log, one `ERVisit` accumulating several entries as the patient is reassessed, the same pattern `ClinicalNote`/`VitalsLog` already use for encounter timelines.
+- `EmergencyService.convertToIpdAdmission` — the Triage Board's one-click "Admit" button, and this step's showcase transaction: the bed claim, the `Admission.create`, closing out the `ERVisit` (status → `ADMITTED`, `dispositionAdmissionId` set), and freeing the ER bay (→ `CLEANING`) all run inside **one** `withTransaction` call. Deliberately does **not** delegate to `ADTService.admitPatient` — composing two independent transactions (claim the bed, then separately close the ER visit) would leave a window where a successful admission exists but the ER visit still shows active if the second step failed. `Admission.model.ts` gains `referredFromErVisitId`, mirroring the existing `referredFromOPDVisitId`.
+- `assignBay` mirrors the same conditional-claim guard as the bed/admission engine; `dischargeErVisit` is the non-admission close-out path (discharged/LAMA/deceased/transferred), freeing the bay the same way.
+- **Frontend** — `ERTriageBoard.tsx`: a high-contrast, four-column (RED/YELLOW/GREEN/BLACK) board using saturated colour blocks rather than the app's usual soft pastel badges, since this screen needs to read at a glance from across a busy floor; each card shows minutes-waited (flagged red past 30 min) and opens `ErVisitDetailModal` for bay assignment, ABCDE reassessment, and disposition — including the one-click "Admit to IPD" action.
+
+**Blood Bank — `models/bloodbank/`, `services/bloodbank.service.ts`, `pages/bloodbank/`:**
+
+- `BloodDonor.model.ts` / `BloodBag.model.ts` / `CrossMatchRequest.model.ts`. `BloodBag.expiryDate` is computed once at collection time from a per-component shelf-life table (whole blood/PRBC ~35-42 days, platelets 5 days, FFP/cryo ~1 year) rather than left for callers to compute, and checked directly at dispense time — never inferred from a background job that might run late.
+- `BloodBankService.logDonation` — creates the bag and bumps the donor's `totalDonations`/`lastDonationDate` atomically. A bag that fails its screening panel is still created (for wastage/traceability reporting) but as `DISCARDED`, never `AVAILABLE` — it can never enter the dispensable pool.
+- `performCrossMatch` — a `COMPATIBLE` result reserves the actual units (`AVAILABLE`→`RESERVED`) in the same transaction as the status change, selected first-expiring-first among non-expired stock; insufficient matching stock aborts the whole reservation rather than partially reserving fewer units than requested.
+- `dispenseBloodBag` — **the module's core safety rule, enforced in code, not just on paper**: a bag can only be issued if (1) it is one of the exact units reserved against a request that came back `COMPATIBLE` — never merely "any `AVAILABLE` bag of the right group" — and (2) it has not expired since being reserved, re-checked at dispense time (not trusted from the earlier reservation check) since a long ward wait can expire a unit while it sits reserved. Either failure raises a `ConflictError` instead of issuing the unit; this is exactly the "prevents dispensing if the cross-match failed or the bag is expired" requirement.
+- **Frontend** — `BloodBankInventory.tsx`: tabs for live inventory-by-blood-group (`InventoryTab`), the donor camp roster with a per-donor "Log Donation" action, and the ward cross-match worklist; `CrossMatchDetailModal` is the compatibility-result/dispense control panel, surfacing the two dispense guards above as plain error text if a user tries to violate them.
+
+**Dialysis & Nephrology — `models/dialysis/`, `services/dialysis.service.ts`, `pages/dialysis/`:**
+
+- `DialysisSession.model.ts` — linked to `Patient` and to `Asset` (`category: DIALYSIS_MACHINE`, the Step 11 biomedical registry — no separate "machine" model needed). This document *is* the Nephrology EMR's dialysis chart: pre/post weight, heparin dose, target/actual ultrafiltration volume, and pre/post BP all live here rather than on a parallel EMR collection, since they only ever mean something in the context of one specific session.
+- `scheduleDialysisSession` — the identical double-booking guard `OTService.scheduleSurgery` uses for theatre rooms, applied to a machine: an overlapping booking on the same `machineAssetId` is rejected inside `withTransaction`, after confirming the asset is actually a `DIALYSIS_MACHINE` and currently `ACTIVE` (not under maintenance).
+- `startSession` / `completeSession` / `cancelOrAbortSession` — single-document state transitions. `completeSession` is the Nephrology EMR's save action (post-dialysis chart → `COMPLETED`); `cancelOrAbortSession` derives the terminal status from what state the session was already in (`SCHEDULED`→`CANCELLED`, `IN_PROGRESS`→`ABORTED`) rather than trusting the caller to pass the right one, so a cancellation can never masquerade as a clean completion.
+- **Frontend** — `DialysisScheduler.tsx`: a machine picker plus that machine's session list (all shifts, colour-coded by status); `NephrologyEmrModal.tsx` is the chart itself — Start for a `SCHEDULED` session, the full post-dialysis parameter form for an `IN_PROGRESS` one, and cancel/abort.
+
+**New RBAC roles:** `ER_NURSE`, `BLOOD_BANK_TECHNICIAN`, `DIALYSIS_TECHNICIAN` added to `SystemRole` (both `hims-backend` and the mirrored `hims-frontend` enum) — each desk gets its own dedicated operator role, the same pattern Step 11 used for `BIOMEDICAL_ENGINEER`/`TPA_OFFICER`, rather than overloading the generic `STAFF_NURSE`/`LAB_TECHNICIAN` roles. Each of the three routers uses one shared router-level gate (`ER_NURSE`/`DOCTOR`/`HEAD_NURSE`/`RECEPTIONIST`/`HOSPITAL_ADMIN` for Emergency; `BLOOD_BANK_TECHNICIAN`/`DOCTOR`/`HOSPITAL_ADMIN` for Blood Bank; `DIALYSIS_TECHNICIAN`/`DOCTOR`/`HOSPITAL_ADMIN` for Dialysis) — the same "one gate per cohesive desk" pattern `insurance.routes.ts` established in Step 11.
+
+Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
@@ -350,3 +388,4 @@ Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc 
 - [x] **Step 9** — LIMS (lab order + reference-range-driven result flagging) and OT/Cath Lab (theatre double-booking guard + sterilization-cycle instrument eligibility) business logic, controllers, and routes. Every domain modeled in Step 1 now has a working backend; no frontend was built for either domain yet (out of scope for this step).
 - [x] **Step 10** — Frontend optimization (Vite `manualChunks` code-splitting, resolving the bundle-size warning) and the RBAC permission-matrix editor (`RoleManagement.tsx`). The editor is built against `GET/PUT /api/admin/roles*` endpoints that don't exist yet — a new `// BACKEND GAP`, tracked the same way Step 4's gaps were until Steps 7–8 closed them.
 - [x] **Step 11 (Part 1: backend)** — Enterprise ERP & Advanced Clinical Modules: Biomedical Asset/AMC management, doctor payroll/revenue-share statements, TPA/insurance claim settlement (closing another Step-1-schema-no-service gap, like Step 9 did for LIMS/OT), and an OT scheduling extension (cross-room staff conflict detection, sterile instrument-set allocation). Two new RBAC roles: `BIOMEDICAL_ENGINEER`, `TPA_OFFICER`. Part 2 (interactive artifact preview) is delivered in-conversation, not as a repo file.
+- [x] **Step 12** — High-Acuity & Specialized Clinical Modules, backend *and* frontend: Emergency/ER (triage board, ABCDE Emergency EMR, one-click ER→IPD admission as a single ACID transaction), Blood Bank (donor/bag/cross-match, with a dispense guard that rejects an unmatched or expired unit in code), and Dialysis/Nephrology (machine-conflict-checked scheduler + post-dialysis chart, reusing the Step 11 biomedical `Asset` registry for machines). Three new RBAC roles: `ER_NURSE`, `BLOOD_BANK_TECHNICIAN`, `DIALYSIS_TECHNICIAN`.
