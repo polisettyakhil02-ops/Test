@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-15)
+# HIMS Platform — Architecture Blueprint (Steps 1-16)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -432,7 +432,7 @@ separate `mrd.service.ts`/`.controller.ts`/`.routes.ts`).
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
-## Step 15 deliverables — Corporate Back-Office & Supply Chain (this checkpoint)
+## Step 15 deliverables — Corporate Back-Office & Supply Chain
 
 Procurement/SCM, Finance & Expenses, and Complaint Management — backend and
 frontend both. Same directory-convention note as every Step since 11: the
@@ -464,6 +464,37 @@ paths are followed in spirit as the established flat convention instead.
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
+## Step 16 deliverables — Analytics Control Towers & Mobile App API Gateways (this checkpoint)
+
+Two unrelated surfaces sharing one Step: leadership analytics, and a
+mobile-specific REST gateway. Same directory-convention note as every Step
+since 11: `src/modules/analytics/` is followed in spirit as the
+established flat convention (`services/analytics.service.ts`,
+`controllers/analytics.controller.ts`, `routes/analytics.routes.ts`); the
+mobile gateway's own requested path, `src/routes/mobile.routes.ts`,
+already matches the flat convention exactly, so no deviation was needed
+there.
+
+**Control Towers & NABH Quality Indicators — `services/analytics.service.ts`, `pages/analytics/ControlTower.tsx`:**
+
+- Every pipeline is read-only against data other modules already write — this service creates nothing.
+- `getOpdWaitingTimeStats` — average minutes from `OPDQueue.checkedInAt` to `consultationStartedAt`, plus a daily trend for the chart.
+- `getIcuBounceBackRate` — the ICU "return to ICU" indicator: walks each `Admission.bedMovementHistory` (the ADT audit trail already recorded by Step 1) with a `$reduce` state machine tracking whether the patient has ever left an ICU/PICU/NICU/CCU/HDU ward and then been transferred back into one, since the ordering along that array is exactly what the indicator hinges on and a flat `$match` can't express a sequence.
+- `getSurgicalSiteInfectionRate` — needed a real structured signal `OTSchedule` didn't have (a free-text `postOpNotes[].complications` string isn't queryable for a rate), so Step 16 adds `hasSurgicalSiteInfection`/`ssiDetectedAt`/`ssiNotes` to `OTSchedule.model.ts` and a `OTService.flagSurgicalSiteInfection` setter (`POST /api/ot/surgeries/:surgeryId/flag-ssi`, COMPLETED surgeries only).
+- `getDepartmentProfitability` / `getTopRevenueGeneratingDoctors` — `Invoice` never stores a department or doctor directly, so both pipelines resolve one by joining through whichever encounter generated the invoice: `OPDVisit.departmentId`/`doctorId` directly for an OPD-sourced invoice, or `Admission.attendingDoctorId` → `Doctor.departmentId` for an IPD-sourced one. Expenses come straight off `Expense.departmentId` (Step 15) — profitability is revenue merged with expenses in application code, the department name join purely a read-side convenience.
+- `getPharmacyWastage` — `EXPIRY_WRITE_OFF`/`DAMAGE_WRITE_OFF` `StockTransaction` rows valued at their batch's own cost price. No service in this build creates those rows yet (an expiry-sweep/damage-write-off feature is its own scope, not part of Step 16) — the pipeline is complete and will simply read empty until that feature exists, the same "aggregation ready, data not there yet" situation Step 15's low-stock dashboard was in before any GRN had been posted.
+- **Frontend** — `ControlTower.tsx`: a dark-mode dashboard (Recharts line/bar charts, a 7/30/90-day range toggle) deliberately mounted outside `DashboardLayout` with its own full-screen shell, the same reasoning `AdminLayout` and the Phlebotomy TV board already established — a CEO-facing analytics surface reads as a different app, not another sidebar item. `recharts` is a new dependency, split into its own `vendor-charts` Vite chunk (see `vite.config.ts`) so a library only the Control Tower route touches doesn't bloat every other page's initial load.
+
+**Mobile App API Gateways — `middlewares/mobileAuth.middleware.ts`, `services/mobile.service.ts`, `routes/mobile.routes.ts`:**
+
+- **The strict mobile-specific JWT strategy**: `signMobileAccessToken`/`verifyMobileAccessToken` (`utils/jwt.ts`) mint a token carrying a mandatory `aud: "hims-mobile"` claim under its own configurable secret (`JWT_MOBILE_ACCESS_SECRET`, falling back to `JWT_ACCESS_SECRET` when unset so existing deployments don't gain a new required env var) and a much shorter TTL (`JWT_MOBILE_ACCESS_TTL_SECONDS`, default 10 minutes vs. the web's 15). `protectMobile` (a deliberately separate middleware, not a flag on `authenticate`) only ever reads `Authorization: Bearer` — never the web session cookie — so a token minted for one surface can never authenticate the other. `POST /api/mobile/auth/login` reuses `AuthService.login` in full (bcrypt check, lockout counter, audit trail) and mints a mobile-scoped token from its result, discarding the web token pair `login()` also issues as a side effect rather than ever returning it to a mobile client.
+- **Closing a real linking gap**: nothing before Step 16 let a `PATIENT`-role account resolve to an actual `Patient` record, since no patient-facing surface had existed yet — `User.model.ts` gains an optional `patientId` ref for exactly that. A Doctor App login needed no equivalent addition; `Doctor.userId` has linked a login to a clinical profile since Step 1.
+- `GET/POST /api/mobile/patient/appointments` — lists/books the *authenticated* patient's own OPD visits only (the patient's `patientId` is resolved server-side from their linked `User` record, never accepted from the request body), reusing `OPDService.bookAppointment` (Step 3) rather than a parallel booking path. Trimmed to a `{visitId, visitNumber, doctorName, visitDate, status, chiefComplaint}` DTO — `status` is read off the linked `OPDQueue` token (`OPDVisit` itself has no status field of its own) since that's the live WAITING/CALLED/IN_CONSULTATION/COMPLETED state a patient's app actually wants.
+- `GET /api/mobile/doctor/ipd-rounds` — the authenticated doctor's own currently-admitted patients (`Admission.attendingDoctorId`), trimmed to a lightweight `{patientName, uhid, wardName, bedNumber, admissionDate, provisionalDiagnosis}` list per admission — a phone's rounds screen, not the full web admission/EMR payload.
+- No frontend was built for the mobile gateway — it serves native Patient/Doctor apps outside this repository, not the web SPA.
+
+Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
@@ -481,3 +512,4 @@ Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc 
 - [x] **Step 13** — Advanced Diagnostics & Sample Collection, backend *and* frontend: Phlebotomy & Queue Management (no new schema — closes the barcode-collection gate on the existing Step 8 `Specimen`/`LabOrder` state machine, adding `LIMSService.receiveSpecimen` and a hard `submitLabResult` guard, plus a TV waiting-room board and a technician print/scan station) and Radiology & RIS (`RadiologyOrder`/`RadiologyReport`, a DICOM-Modality-Worklist-mimicking JSON endpoint, a machine scheduler reusing the OT/Dialysis conflict-guard pattern, and a split-screen report editor reusing the EMR's own `PatientHistoryPanel`). Two new RBAC roles: `PHLEBOTOMIST`, `RADIOLOGY_TECHNICIAN`.
 - [x] **Step 14** — Specialty EMRs & Medical Record Department, backend *and* frontend: IVF EMR (stimulation → retrieval → fertilization → transfer → beta-hCG, one document per cycle), Obstetric EMR (ANC visits plus a digital WHO-format Partograph with a hand-drawn SVG alert/action-line chart), Pediatric EMR (a seeded childhood vaccination schedule plus a three-metric WHO growth chart), and DMO shift-handover (SBAR-format, doctor-authored, criticality-ranked, deliberately its own model rather than an extension of the nurse-scoped `ShiftHandover`) — all under one `specialtyEmr.service.ts`, the same multi-model-one-service precedent `lims.service.ts` set. Medical Record Department: physical file custody (barcode check-in/check-out with full movement history), post-discharge ICD-10 coding finalization and its own pending-coding dashboard, and a legal/insurance/patient-copy request log. One new RBAC role: `MRD_EXECUTIVE`.
 - [x] **Step 15** — Corporate Back-Office & Supply Chain, backend *and* frontend: Procurement/SCM (`DepartmentIndent` demand-side requests, finally wiring up Step 1's dormant `PurchaseOrder`/`Supplier` models, and a new `GoodsReceiptNote` whose `postGrnToStock` is the step's ACID showcase — a verified GRN becoming real `DrugBatch`/`StockTransaction` ledger entries in one transaction), Finance & Expenses (`Expense` — the OPEX mirror of the patient-facing `Invoice`/`Payment` domain, with an Accounts Payable UI including a vendor-invoice file picker), and Complaint Management (`Ticket` covering both Facility Maintenance and Patient Grievance on one assign/track/resolve lifecycle, with a five-column Kanban board and stamped `resolutionMinutes`). Four new RBAC roles: `PROCUREMENT_OFFICER`, `ACCOUNTS_EXECUTIVE`, `FACILITY_MANAGER`, `MAINTENANCE_STAFF`.
+- [x] **Step 16** — Analytics Control Towers & Mobile App API Gateways, backend *and* frontend (Control Tower only — the mobile gateway serves native apps outside this repo): six read-only aggregation pipelines (`analytics.service.ts`) covering NABH quality indicators (OPD waiting time, an ICU bounce-back rate walked via a `$reduce` state machine over each admission's own ADT trail, and a surgical-site-infection rate backed by a new structured `OTSchedule.hasSurgicalSiteInfection` flag) and "Make Money Save Money" financial analytics (department profitability and top-revenue doctors, both resolved by joining `Invoice` through its originating OPD/IPD encounter since `Invoice` stores neither directly; pharmacy wastage valued at cost price). A dark-mode `ControlTower.tsx` (Recharts, its own full-screen shell outside `DashboardLayout`) renders it for hospital leadership. The mobile gateway (`mobile.routes.ts`) introduces a strictly separate, `aud`-scoped JWT strategy (`signMobileAccessToken`/`verifyMobileAccessToken`, a dedicated `protectMobile` middleware, Bearer-only) so a token minted for one surface can never authenticate the other, plus the first-ever `User.patientId` link letting a patient account resolve to its own MPI record; `/api/mobile/patient/appointments` (reusing `OPDService.bookAppointment`) and `/api/mobile/doctor/ipd-rounds` return lightweight, role-scoped DTOs rather than the web SPA's full payloads. No new RBAC roles — every mobile/analytics endpoint gates on roles that already existed.

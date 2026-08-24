@@ -38,6 +38,10 @@ export interface OTScheduleAttrs {
   sterilizationLogId?: Types.ObjectId;
   postOpNotes: PostOpNote[];
   invoiceId?: Types.ObjectId;
+  /** Step 16: the NABH Surgical Site Infection quality indicator needs a real structured signal — a free-text `postOpNotes[].complications` string isn't queryable for a rate calculation — so post-op surveillance flags it explicitly here. */
+  hasSurgicalSiteInfection: boolean;
+  ssiDetectedAt?: Date;
+  ssiNotes?: string;
   createdBy: string;
 }
 
@@ -96,6 +100,9 @@ const OTScheduleSchema = new Schema<OTScheduleAttrs>(
     sterilizationLogId: { type: Schema.Types.ObjectId, ref: "SterilizationLog" },
     postOpNotes: { type: [PostOpNoteSchema], default: [] },
     invoiceId: { type: Schema.Types.ObjectId, ref: "Invoice" },
+    hasSurgicalSiteInfection: { type: Boolean, required: true, default: false },
+    ssiDetectedAt: { type: Date },
+    ssiNotes: { type: String, trim: true, maxlength: 1000 },
     createdBy: { type: String, required: true },
   },
   { timestamps: true, collection: "ot_schedules" },

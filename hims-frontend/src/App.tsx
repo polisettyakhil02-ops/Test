@@ -29,6 +29,7 @@ import { IcdCodingQueue } from "@/pages/mrd/IcdCodingQueue";
 import { ProcurementDashboard } from "@/pages/scm/ProcurementDashboard";
 import { AccountsPayable } from "@/pages/finance/AccountsPayable";
 import { ComplaintsBoard } from "@/pages/complaints/ComplaintsBoard";
+import { ControlTower } from "@/pages/analytics/ControlTower";
 import { SystemRole } from "@/types/common.types";
 
 const IPD_ROLES = [
@@ -73,6 +74,7 @@ const SCM_ROLES = [
 ];
 const FINANCE_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.ACCOUNTS_EXECUTIVE];
 const COMPLAINTS_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.FACILITY_MANAGER, SystemRole.MAINTENANCE_STAFF];
+const CONTROL_TOWER_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.AUDITOR];
 
 export default function App() {
   return (
@@ -166,6 +168,11 @@ export default function App() {
       {/* TV-style waiting-room board — deliberately outside DashboardLayout, same reasoning as AdminLayout: it renders its own full-screen shell with no sidebar chrome, since it's meant for an unattended kiosk display. */}
       <Route element={<ProtectedRoute roles={PHLEBOTOMY_ROLES} />}>
         <Route path="/phlebotomy/board" element={<PhlebotomyQueueBoard />} />
+      </Route>
+
+      {/* Hospital Control Tower — deliberately outside DashboardLayout: a CEO/management analytics surface reads as its own app, not another item in the operational sidebar, and it renders its own dark full-screen shell. */}
+      <Route element={<ProtectedRoute roles={CONTROL_TOWER_ROLES} />}>
+        <Route path="/control-tower" element={<ControlTower />} />
       </Route>
     </Routes>
   );

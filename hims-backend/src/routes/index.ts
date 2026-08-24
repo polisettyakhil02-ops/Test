@@ -21,6 +21,8 @@ import mrdRoutes from "./mrd.routes.js";
 import scmRoutes from "./scm.routes.js";
 import financeRoutes from "./finance.routes.js";
 import complaintsRoutes from "./complaints.routes.js";
+import analyticsRoutes from "./analytics.routes.js";
+import mobileRoutes from "./mobile.routes.js";
 
 /**
  * Main API router, mounted at "/api" by `app.ts`. `patientRoutes` spans
@@ -52,5 +54,7 @@ router.use("/mrd", mrdRoutes);
 router.use("/scm", scmRoutes);
 router.use("/finance", financeRoutes);
 router.use("/complaints", complaintsRoutes);
+router.use("/analytics", analyticsRoutes);
+router.use("/mobile", mobileRoutes);
 
 export default router;

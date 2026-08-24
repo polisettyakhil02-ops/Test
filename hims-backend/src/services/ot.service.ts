@@ -255,6 +255,20 @@ export class OTService {
     await surgery.save();
     return surgery;
   }
+
+  /** Post-op surveillance flag feeding the NABH Surgical Site Infection rate (`AnalyticsService.getSurgicalSiteInfectionRate`) — only meaningful once the surgery has actually happened. */
+  async flagSurgicalSiteInfection(surgeryId: string, notes: string): Promise<OTScheduleDocument> {
+    const surgery = await OTSchedule.findById(toObjectId(surgeryId, "surgeryId"));
+    if (!surgery) throw new NotFoundError(`Surgery ${surgeryId} not found`);
+    if (surgery.status !== SurgeryStatus.COMPLETED) {
+      throw new ConflictError(`Surgery ${surgery.surgeryNumber} is ${surgery.status}, not COMPLETED`);
+    }
+    surgery.hasSurgicalSiteInfection = true;
+    surgery.ssiDetectedAt = new Date();
+    surgery.ssiNotes = notes;
+    await surgery.save();
+    return surgery;
+  }
 }
 
 export const otService = new OTService();

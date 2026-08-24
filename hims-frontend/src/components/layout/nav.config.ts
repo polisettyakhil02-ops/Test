@@ -151,6 +151,12 @@ export const NAV_ITEMS: NavItem[] = [
     roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.FACILITY_MANAGER, SystemRole.MAINTENANCE_STAFF],
   },
   {
+    label: "Control Tower",
+    path: "/control-tower",
+    icon: "📈",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.AUDITOR],
+  },
+  {
     label: "Admin Console",
     path: "/admin",
     icon: "⚙",

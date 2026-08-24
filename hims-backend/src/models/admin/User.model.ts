@@ -1,4 +1,4 @@
-import { Schema, model, type Model, type HydratedDocument } from "mongoose";
+import { Schema, model, type Model, type HydratedDocument, type Types } from "mongoose";
 import bcrypt from "bcryptjs";
 import { SystemRole, EMAIL_REGEX, PHONE_REGEX } from "../../types/common.types.js";
 
@@ -24,6 +24,8 @@ export interface UserAttrs {
   passwordChangedAt: Date;
   mfaEnabled: boolean;
   mfaSecretEncrypted?: string;
+  /** Step 16: links a PATIENT-role login to their own MPI record, so the Patient App's mobile gateway can resolve "which patient is this" from the authenticated user alone — nothing before this step ever needed a patient to log in at all. */
+  patientId?: Types.ObjectId;
 }
 
 export interface UserMethods {
@@ -56,6 +58,7 @@ const UserSchema = new Schema<UserAttrs, Model<UserAttrs, object, UserMethods>, 
     passwordChangedAt: { type: Date, required: true, default: () => new Date() },
     mfaEnabled: { type: Boolean, required: true, default: false },
     mfaSecretEncrypted: { type: String, select: false },
+    patientId: { type: Schema.Types.ObjectId, ref: "Patient" },
   },
   { timestamps: true, collection: "users" },
 );

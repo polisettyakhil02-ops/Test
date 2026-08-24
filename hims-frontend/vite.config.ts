@@ -28,6 +28,14 @@ function vendorChunk(id: string): string | undefined {
     // loaded on the same admin pages.
     return "vendor-tanstack";
   }
+  if (id.includes("node_modules/recharts/") || id.includes("node_modules/d3-") || id.includes("node_modules/victory-vendor/")) {
+    // Step 16: recharts (and the d3-* submodules/victory-vendor it pulls
+    // in) is what pushed the generic vendor bundle over the 500kB warning
+    // threshold — it's also only ever loaded by the Control Tower route,
+    // so splitting it into its own chunk keeps every other page's initial
+    // load unaffected by a charting library most sessions never touch.
+    return "vendor-charts";
+  }
   if (id.includes("node_modules/lucide-react/")) {
     // Not currently a dependency of this project — the app renders
     // inline Unicode glyphs for icons (see components/layout/nav.config.ts)

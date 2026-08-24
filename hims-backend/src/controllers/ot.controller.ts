@@ -174,3 +174,26 @@ export async function allocateInstrumentSet(req: Request, res: Response, next: N
     next(err);
   }
 }
+
+const FlagSurgicalSiteInfectionSchema = z.object({ notes: z.string().min(1).max(1000) }).strict();
+
+/** POST /api/ot/surgeries/:surgeryId/flag-ssi — post-op surveillance flag feeding the NABH SSI-rate analytics pipeline. */
+export async function flagSurgicalSiteInfection(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError("Must be authenticated");
+    }
+    const { surgeryId } = req.params;
+    if (!surgeryId) {
+      throw new ValidationError("surgeryId route parameter is required");
+    }
+    const parsed = FlagSurgicalSiteInfectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ValidationError(formatZodError(parsed.error));
+    }
+    const surgery = await otService.flagSurgicalSiteInfection(surgeryId, parsed.data.notes);
+    res.status(200).json({ data: surgery });
+  } catch (err) {
+    next(err);
+  }
+}
