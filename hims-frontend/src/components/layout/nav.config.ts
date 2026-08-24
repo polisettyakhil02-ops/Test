@@ -90,6 +90,36 @@ export const NAV_ITEMS: NavItem[] = [
     roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.RADIOLOGY_TECHNICIAN, SystemRole.DOCTOR],
   },
   {
+    label: "IVF EMR",
+    path: "/specialty-emr/ivf",
+    icon: "🧬",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DOCTOR],
+  },
+  {
+    label: "Obstetric EMR",
+    path: "/specialty-emr/obstetric",
+    icon: "🤰",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DOCTOR, SystemRole.HEAD_NURSE, SystemRole.STAFF_NURSE],
+  },
+  {
+    label: "DMO Handover",
+    path: "/specialty-emr/dmo",
+    icon: "🌙",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DOCTOR],
+  },
+  {
+    label: "MRD File Tracker",
+    path: "/mrd",
+    icon: "🗄",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.MRD_EXECUTIVE],
+  },
+  {
+    label: "ICD Coding Queue",
+    path: "/mrd/coding",
+    icon: "📋",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.MRD_EXECUTIVE],
+  },
+  {
     label: "Admin Console",
     path: "/admin",
     icon: "⚙",

@@ -53,6 +53,8 @@ export enum SystemRole {
   DIALYSIS_TECHNICIAN = "DIALYSIS_TECHNICIAN",
   PHLEBOTOMIST = "PHLEBOTOMIST",
   RADIOLOGY_TECHNICIAN = "RADIOLOGY_TECHNICIAN",
+  /** Step 14: Medical Record Department — physical file custody, ICD-10 coding finalization, legal/insurance record requests. Doctors already cover every Specialty EMR (IVF/Obstetric/DMO) writer role, so this is the only new role Step 14 needs. */
+  MRD_EXECUTIVE = "MRD_EXECUTIVE",
 }
 
 export enum PermissionAction {
@@ -383,7 +385,9 @@ export interface AuditableFields {
 }
 
 /* ============================================================================
- * Step 12 — Emergency/ER, Blood Bank, Dialysis & Nephrology
+ * Step 12 — Emergency/ER, Blood Bank, Dialysis & Nephrology.
+ * (DialysisShift below is also reused by Step 14's DmoHandoverNote — see
+ * that enum's own doc comment.)
  * ==========================================================================*/
 
 /** START/ESI-style colour triage, in acuity order (RED highest). BLACK covers both expectant and deceased-on-arrival — this build doesn't split them further since neither changes how the ER desk operates on the case. */
@@ -490,6 +494,104 @@ export enum RadiologyOrderStatus {
 export enum RadiologyReportStatus {
   DRAFT = "DRAFT",
   FINALIZED = "FINALIZED",
+}
+
+/* ============================================================================
+ * Step 14 — Specialty EMRs (IVF, Obstetric, DMO) & Medical Record Department.
+ * ==========================================================================*/
+
+export enum IvfProtocolType {
+  AGONIST_LONG = "AGONIST_LONG",
+  AGONIST_SHORT = "AGONIST_SHORT",
+  ANTAGONIST = "ANTAGONIST",
+  MINI_IVF = "MINI_IVF",
+  NATURAL_CYCLE = "NATURAL_CYCLE",
+  FROZEN_EMBRYO_TRANSFER = "FROZEN_EMBRYO_TRANSFER",
+}
+
+export enum IvfCycleStatus {
+  STIMULATION = "STIMULATION",
+  TRIGGERED = "TRIGGERED",
+  RETRIEVAL_DONE = "RETRIEVAL_DONE",
+  FERTILIZATION_DONE = "FERTILIZATION_DONE",
+  EMBRYO_TRANSFERRED = "EMBRYO_TRANSFERRED",
+  LUTEAL_SUPPORT = "LUTEAL_SUPPORT",
+  PREGNANCY_CONFIRMED = "PREGNANCY_CONFIRMED",
+  NOT_PREGNANT = "NOT_PREGNANT",
+  CANCELLED = "CANCELLED",
+}
+
+export enum FertilizationMethod {
+  IVF = "IVF",
+  ICSI = "ICSI", // Intracytoplasmic Sperm Injection
+}
+
+export enum EmbryoStage {
+  CLEAVAGE = "CLEAVAGE", // day 2-3
+  BLASTOCYST = "BLASTOCYST", // day 5-6
+}
+
+export enum ObstetricRecordStatus {
+  ANTENATAL = "ANTENATAL",
+  IN_LABOR = "IN_LABOR",
+  DELIVERED = "DELIVERED",
+  POSTNATAL_DISCHARGED = "POSTNATAL_DISCHARGED",
+}
+
+export enum DeliveryMode {
+  VAGINAL_NORMAL = "VAGINAL_NORMAL",
+  VAGINAL_INSTRUMENTAL = "VAGINAL_INSTRUMENTAL", // forceps/vacuum
+  CESAREAN_SECTION = "CESAREAN_SECTION",
+}
+
+export enum FetalPresentation {
+  CEPHALIC = "CEPHALIC",
+  BREECH = "BREECH",
+  TRANSVERSE = "TRANSVERSE",
+  OTHER = "OTHER",
+}
+
+/** WHO partograph liquor-colour vocabulary, recorded once per partograph reading. */
+export enum LiquorColor {
+  CLEAR = "CLEAR",
+  MECONIUM_STAINED = "MECONIUM_STAINED",
+  BLOOD_STAINED = "BLOOD_STAINED",
+  ABSENT = "ABSENT",
+}
+
+export enum DmoCriticalityLevel {
+  WATCH = "WATCH",
+  URGENT = "URGENT",
+  CRITICAL = "CRITICAL",
+}
+
+export enum DmoHandoverStatus {
+  PENDING_ACKNOWLEDGEMENT = "PENDING_ACKNOWLEDGEMENT",
+  ACKNOWLEDGED = "ACKNOWLEDGED",
+}
+
+export enum MrdArchiveStatus {
+  ARCHIVED = "ARCHIVED",
+  CHECKED_OUT = "CHECKED_OUT",
+}
+
+export enum IcdCodingStatus {
+  PENDING = "PENDING",
+  CODED = "CODED",
+  QUERY_RAISED = "QUERY_RAISED", // coder needs the treating doctor to clarify a diagnosis before it can be finalized
+}
+
+export enum MrdFileRequestType {
+  LEGAL = "LEGAL",
+  INSURANCE = "INSURANCE",
+  PATIENT_COPY = "PATIENT_COPY",
+  INTERNAL_AUDIT = "INTERNAL_AUDIT",
+}
+
+export enum MrdFileRequestStatus {
+  PENDING = "PENDING",
+  FULFILLED = "FULFILLED",
+  DENIED = "DENIED",
 }
 
 export const ICD10_CODE_REGEX = /^[A-TV-Z][0-9][0-9AB](\.[0-9A-TV-Z]{1,4})?$/;

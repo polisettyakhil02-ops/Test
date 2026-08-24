@@ -26,6 +26,7 @@ export const SystemRole = {
   DIALYSIS_TECHNICIAN: "DIALYSIS_TECHNICIAN",
   PHLEBOTOMIST: "PHLEBOTOMIST",
   RADIOLOGY_TECHNICIAN: "RADIOLOGY_TECHNICIAN",
+  MRD_EXECUTIVE: "MRD_EXECUTIVE",
 } as const;
 export type SystemRole = (typeof SystemRole)[keyof typeof SystemRole];
 
@@ -343,6 +344,88 @@ export const RadiologyReportStatus = {
   FINALIZED: "FINALIZED",
 } as const;
 export type RadiologyReportStatus = (typeof RadiologyReportStatus)[keyof typeof RadiologyReportStatus];
+
+/* ============================================================================
+ * Step 14 — Specialty EMRs (IVF, Obstetric, DMO) & Medical Record Department.
+ * ==========================================================================*/
+
+export const IvfProtocolType = {
+  AGONIST_LONG: "AGONIST_LONG",
+  AGONIST_SHORT: "AGONIST_SHORT",
+  ANTAGONIST: "ANTAGONIST",
+  MINI_IVF: "MINI_IVF",
+  NATURAL_CYCLE: "NATURAL_CYCLE",
+  FROZEN_EMBRYO_TRANSFER: "FROZEN_EMBRYO_TRANSFER",
+} as const;
+export type IvfProtocolType = (typeof IvfProtocolType)[keyof typeof IvfProtocolType];
+
+export const IvfCycleStatus = {
+  STIMULATION: "STIMULATION",
+  TRIGGERED: "TRIGGERED",
+  RETRIEVAL_DONE: "RETRIEVAL_DONE",
+  FERTILIZATION_DONE: "FERTILIZATION_DONE",
+  EMBRYO_TRANSFERRED: "EMBRYO_TRANSFERRED",
+  LUTEAL_SUPPORT: "LUTEAL_SUPPORT",
+  PREGNANCY_CONFIRMED: "PREGNANCY_CONFIRMED",
+  NOT_PREGNANT: "NOT_PREGNANT",
+  CANCELLED: "CANCELLED",
+} as const;
+export type IvfCycleStatus = (typeof IvfCycleStatus)[keyof typeof IvfCycleStatus];
+
+export const FertilizationMethod = { IVF: "IVF", ICSI: "ICSI" } as const;
+export type FertilizationMethod = (typeof FertilizationMethod)[keyof typeof FertilizationMethod];
+
+export const EmbryoStage = { CLEAVAGE: "CLEAVAGE", BLASTOCYST: "BLASTOCYST" } as const;
+export type EmbryoStage = (typeof EmbryoStage)[keyof typeof EmbryoStage];
+
+export const ObstetricRecordStatus = {
+  ANTENATAL: "ANTENATAL",
+  IN_LABOR: "IN_LABOR",
+  DELIVERED: "DELIVERED",
+  POSTNATAL_DISCHARGED: "POSTNATAL_DISCHARGED",
+} as const;
+export type ObstetricRecordStatus = (typeof ObstetricRecordStatus)[keyof typeof ObstetricRecordStatus];
+
+export const DeliveryMode = {
+  VAGINAL_NORMAL: "VAGINAL_NORMAL",
+  VAGINAL_INSTRUMENTAL: "VAGINAL_INSTRUMENTAL",
+  CESAREAN_SECTION: "CESAREAN_SECTION",
+} as const;
+export type DeliveryMode = (typeof DeliveryMode)[keyof typeof DeliveryMode];
+
+export const FetalPresentation = { CEPHALIC: "CEPHALIC", BREECH: "BREECH", TRANSVERSE: "TRANSVERSE", OTHER: "OTHER" } as const;
+export type FetalPresentation = (typeof FetalPresentation)[keyof typeof FetalPresentation];
+
+export const LiquorColor = {
+  CLEAR: "CLEAR",
+  MECONIUM_STAINED: "MECONIUM_STAINED",
+  BLOOD_STAINED: "BLOOD_STAINED",
+  ABSENT: "ABSENT",
+} as const;
+export type LiquorColor = (typeof LiquorColor)[keyof typeof LiquorColor];
+
+export const DmoCriticalityLevel = { WATCH: "WATCH", URGENT: "URGENT", CRITICAL: "CRITICAL" } as const;
+export type DmoCriticalityLevel = (typeof DmoCriticalityLevel)[keyof typeof DmoCriticalityLevel];
+
+export const DmoHandoverStatus = { PENDING_ACKNOWLEDGEMENT: "PENDING_ACKNOWLEDGEMENT", ACKNOWLEDGED: "ACKNOWLEDGED" } as const;
+export type DmoHandoverStatus = (typeof DmoHandoverStatus)[keyof typeof DmoHandoverStatus];
+
+export const MrdArchiveStatus = { ARCHIVED: "ARCHIVED", CHECKED_OUT: "CHECKED_OUT" } as const;
+export type MrdArchiveStatus = (typeof MrdArchiveStatus)[keyof typeof MrdArchiveStatus];
+
+export const IcdCodingStatus = { PENDING: "PENDING", CODED: "CODED", QUERY_RAISED: "QUERY_RAISED" } as const;
+export type IcdCodingStatus = (typeof IcdCodingStatus)[keyof typeof IcdCodingStatus];
+
+export const MrdFileRequestType = {
+  LEGAL: "LEGAL",
+  INSURANCE: "INSURANCE",
+  PATIENT_COPY: "PATIENT_COPY",
+  INTERNAL_AUDIT: "INTERNAL_AUDIT",
+} as const;
+export type MrdFileRequestType = (typeof MrdFileRequestType)[keyof typeof MrdFileRequestType];
+
+export const MrdFileRequestStatus = { PENDING: "PENDING", FULFILLED: "FULFILLED", DENIED: "DENIED" } as const;
+export type MrdFileRequestStatus = (typeof MrdFileRequestStatus)[keyof typeof MrdFileRequestStatus];
 
 /** Every API response's envelope shape (see hims-backend controllers: `res.json({ data: ... })`). */
 export interface ApiEnvelope<T> {

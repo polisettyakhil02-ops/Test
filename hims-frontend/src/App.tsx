@@ -20,6 +20,11 @@ import { PhlebotomyCollectionStation } from "@/pages/phlebotomy/PhlebotomyCollec
 import { PhlebotomyQueueBoard } from "@/pages/phlebotomy/PhlebotomyQueueBoard";
 import { RadiologyWorklist } from "@/pages/radiology/RadiologyWorklist";
 import { RadiologyReportEditor } from "@/pages/radiology/RadiologyReportEditor";
+import { IvfEmrPanel } from "@/pages/specialty_emr/IvfEmrPanel";
+import { ObstetricEmrPanel } from "@/pages/specialty_emr/ObstetricEmrPanel";
+import { DmoHandoverBoard } from "@/pages/specialty_emr/DmoHandoverBoard";
+import { MrdFileTracker } from "@/pages/mrd/MrdFileTracker";
+import { IcdCodingQueue } from "@/pages/mrd/IcdCodingQueue";
 import { SystemRole } from "@/types/common.types";
 
 const IPD_ROLES = [
@@ -46,6 +51,14 @@ const BLOODBANK_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, Syst
 const DIALYSIS_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.DIALYSIS_TECHNICIAN, SystemRole.DOCTOR];
 const PHLEBOTOMY_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.PHLEBOTOMIST, SystemRole.LAB_TECHNICIAN];
 const RADIOLOGY_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.RADIOLOGY_TECHNICIAN, SystemRole.DOCTOR];
+const SPECIALTY_EMR_ROLES = [
+  SystemRole.SUPER_ADMIN,
+  SystemRole.HOSPITAL_ADMIN,
+  SystemRole.DOCTOR,
+  SystemRole.HEAD_NURSE,
+  SystemRole.STAFF_NURSE,
+];
+const MRD_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.MRD_EXECUTIVE];
 
 export default function App() {
   return (
@@ -93,6 +106,17 @@ export default function App() {
           <Route element={<ProtectedRoute roles={RADIOLOGY_ROLES} />}>
             <Route path="radiology" element={<RadiologyWorklist />} />
             <Route path="radiology/report/:orderId" element={<RadiologyReportEditor />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={SPECIALTY_EMR_ROLES} />}>
+            <Route path="specialty-emr/ivf" element={<IvfEmrPanel />} />
+            <Route path="specialty-emr/obstetric" element={<ObstetricEmrPanel />} />
+            <Route path="specialty-emr/dmo" element={<DmoHandoverBoard />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={MRD_ROLES} />}>
+            <Route path="mrd" element={<MrdFileTracker />} />
+            <Route path="mrd/coding" element={<IcdCodingQueue />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

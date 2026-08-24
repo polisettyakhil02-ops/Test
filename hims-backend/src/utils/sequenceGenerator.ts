@@ -39,3 +39,7 @@ export const generateBloodBagNumber = (): Promise<string> => generateSequenceNum
 export const generateCrossMatchRequestNumber = (): Promise<string> => generateSequenceNumber("XM", "crossMatchRequest");
 export const generateDialysisSessionNumber = (): Promise<string> => generateSequenceNumber("DLS", "dialysisSession");
 export const generateRadiologyOrderNumber = (): Promise<string> => generateSequenceNumber("RAD", "radiologyOrder");
+export const generateIvfCycleNumber = (): Promise<string> => generateSequenceNumber("IVF", "ivfCycle");
+export const generateObstetricRecordNumber = (): Promise<string> => generateSequenceNumber("OBS", "obstetricRecord");
+export const generateDmoHandoverNoteNumber = (): Promise<string> => generateSequenceNumber("DMO", "dmoHandoverNote");
+export const generateMrdArchiveNumber = (): Promise<string> => generateSequenceNumber("MRD", "mrdArchive");

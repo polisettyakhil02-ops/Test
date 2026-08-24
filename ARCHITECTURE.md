@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-13)
+# HIMS Platform — Architecture Blueprint (Steps 1-14)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -375,7 +375,7 @@ in spirit as `src/models/emergency/`, `src/services/emergency.service.ts`,
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
-## Step 13 deliverables — Advanced Diagnostics & Sample Collection (this checkpoint)
+## Step 13 deliverables — Advanced Diagnostics & Sample Collection
 
 Phlebotomy & Queue Management, and Radiology & RIS — backend and frontend
 both. Same directory-convention note as Steps 11-12: the request's
@@ -400,6 +400,37 @@ spirit as the established flat convention instead.
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
+## Step 14 deliverables — Specialty EMRs & Medical Record Department (this checkpoint)
+
+IVF/Obstetric/DMO Specialty EMRs, and the Medical Record Department (MRD) —
+backend and frontend both. Same directory-convention note as every Step
+since 11: the request's `src/modules/specialty_emr/` / `src/modules/mrd/`
+paths are followed in spirit as the established flat convention instead
+(`models/specialty_emr/`, `models/mrd/`, one `specialtyEmr.service.ts`
+bundling all three specialties — the same one-file-per-cohesive-domain
+precedent `lims.service.ts` already set for LabTest/LabOrder/Specimen/
+LabResult — plus its own `specialtyEmr.controller.ts`/`.routes.ts`, and a
+separate `mrd.service.ts`/`.controller.ts`/`.routes.ts`).
+
+**Specialty EMRs — `models/specialty_emr/`, `services/specialtyEmr.service.ts`, `pages/specialty_emr/`:**
+
+- **IVF EMR** (`IvfCycle.model.ts`) — one growing document per ART attempt, the same "this only ever means something in the context of one case" reasoning `DialysisSession` already uses for its own chart fields, so every stage is a single-document transition rather than a multi-collection write: stimulation monitoring visits (follicle counts, endometrial thickness, estradiol) → trigger shot → egg retrieval (oocyte/mature counts, fertilization method) → fertilization outcome (embryos formed/frozen) → embryo transfer (stage, fresh/frozen) → luteal support → the beta-hCG pregnancy test, which resolves the cycle to `PREGNANCY_CONFIRMED`/`NOT_PREGNANT`. Frontend walks the same pipeline: `IvfEmrPanel.tsx` lists cycles by stage, `IvfCycleDetailModal.tsx` renders only the one form the cycle's current status actually calls for next.
+- **Obstetric EMR** (`ObstetricRecord.model.ts`) — ANC visits and the digital Partograph live as embedded arrays on one per-pregnancy document, since the partograph is strictly a time series and would otherwise need reassembling from a separate collection on every render. `addPartographReading` is what actually flips the record `ANTENATAL` → `IN_LABOR` (stamping `laborOnsetAt` off the first reading) rather than a separate "start labor" action — the first plotted reading *is* the clinical start of labor. `recordDelivery` requires `IN_LABOR`; `dischargePostnatal` requires `DELIVERED`. Frontend's `PartographChart.tsx` is a hand-drawn inline SVG plotting cervical dilation against hours-since-onset, with the standard WHO alert line (1cm/hr from a 4cm baseline) and action line (the same slope, shifted 4 hours) so a widening gap between the plotted curve and the action line reads at a glance the way the paper chart does.
+- **DMO shift-handover** (`DmoHandoverNote.model.ts`) — deliberately a new model, not an extension of the existing `nursing/ShiftHandover.model.ts` (Step 1): `ShiftHandover` is one document per ward per shift, filed by the outgoing *nurse* and scoped to that ward's beds; a DMO note is authored by the covering *doctor*, raised ad hoc the moment a concern appears for one specific patient (not batched per ward), and is acknowledged by name rather than a ward-level boolean — different actor, different granularity, different close-out semantics. SBAR-format (situation/background/assessment/recommendation), an explicit `criticalityLevel` (WATCH/URGENT/CRITICAL), and a `PENDING_ACKNOWLEDGEMENT` → `ACKNOWLEDGED` state the incoming doctor closes out by name. `shift` reuses the existing `DialysisShift` enum (see that enum's own doc comment) — it's just the same time-of-day-shift vocabulary, not a dialysis-specific concept, the identical reasoning behind reusing `AssetCategory`/`LabOrderPriority`/`BedStatus` in Steps 12-13. Frontend's `DmoHandoverBoard.tsx` sorts pending-first, most-critical-first — the morning team's actual triage order.
+- No new schema needed a genuinely multi-collection write, so none of this service's mutations use `withTransaction` — the same single-document-write reasoning already documented on `EMRService.addPrescription` and every `DialysisService` transition.
+
+**MRD (Medical Record Department) — `models/mrd/MedicalRecordArchive.model.ts`, `services/mrd.service.ts`, `pages/mrd/`:**
+
+- One `MedicalRecordArchive` per discharged admission, created by MRD staff (not auto-generated at discharge) — the physical file's actual arrival in the archive room is a real-world event the system can't observe on its own, so `listEligibleForArchiving` surfaces every discharged admission that doesn't have one yet as the "create archive" form's picker.
+- Physical custody: `fileBarcodeId` is the folder's own barcode label (distinct from the admission/patient's own identifiers); `checkOutFile`/`checkInFile` scan it in or out, moving a `currentMovement` record into `movementHistory` on check-in so every past loan is auditable, not just the current one.
+- Billing-audit ICD-10 coding: `finalizeIcdCoding` requires at least one code with exactly one marked primary (validated both client- and server-side, reusing the existing `ICD10_CODE_REGEX`) and stamps who coded it and when; `flagIcdQuery` is the escape hatch when a coder needs the treating doctor to clarify a diagnosis before finalizing. `listPendingCoding` — every archive still `PENDING`/`QUERY_RAISED`, oldest first — is the literal "dashboard to track pending ICD coding tasks post-discharge" the request asked for.
+- Legal/insurance/patient-copy requests are logged as an embedded array on the archive itself (`fileRequests`), each independently resolvable to `FULFILLED`/`DENIED` — a log against the file the request was actually about, not a separate ticketing collection.
+- **Frontend** — `MrdFileTracker.tsx`: a barcode-scanner check-in/check-out desk plus the archive list, drilling into `ArchiveDetailModal` for movement history and request logging. `IcdCodingQueue.tsx`: the pending-coding backlog dashboard with a `FinalizeCodingModal` (a real `useFieldArray` multi-code form, fixed mid-build so the "exactly one primary" radio buttons share one native `name` — a naive per-row `register` would have given each row its own field-scoped name and silently allowed more than one row checked).
+
+**New RBAC role:** `MRD_EXECUTIVE`. Specialty EMRs need no new writer roles — a fertility specialist, obstetrician, and duty medical officer are all just `DOCTOR` by role in this system.
+
+Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
@@ -415,3 +446,4 @@ Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc 
 - [x] **Step 11 (Part 1: backend)** — Enterprise ERP & Advanced Clinical Modules: Biomedical Asset/AMC management, doctor payroll/revenue-share statements, TPA/insurance claim settlement (closing another Step-1-schema-no-service gap, like Step 9 did for LIMS/OT), and an OT scheduling extension (cross-room staff conflict detection, sterile instrument-set allocation). Two new RBAC roles: `BIOMEDICAL_ENGINEER`, `TPA_OFFICER`. Part 2 (interactive artifact preview) is delivered in-conversation, not as a repo file.
 - [x] **Step 12** — High-Acuity & Specialized Clinical Modules, backend *and* frontend: Emergency/ER (triage board, ABCDE Emergency EMR, one-click ER→IPD admission as a single ACID transaction), Blood Bank (donor/bag/cross-match, with a dispense guard that rejects an unmatched or expired unit in code), and Dialysis/Nephrology (machine-conflict-checked scheduler + post-dialysis chart, reusing the Step 11 biomedical `Asset` registry for machines). Three new RBAC roles: `ER_NURSE`, `BLOOD_BANK_TECHNICIAN`, `DIALYSIS_TECHNICIAN`.
 - [x] **Step 13** — Advanced Diagnostics & Sample Collection, backend *and* frontend: Phlebotomy & Queue Management (no new schema — closes the barcode-collection gate on the existing Step 8 `Specimen`/`LabOrder` state machine, adding `LIMSService.receiveSpecimen` and a hard `submitLabResult` guard, plus a TV waiting-room board and a technician print/scan station) and Radiology & RIS (`RadiologyOrder`/`RadiologyReport`, a DICOM-Modality-Worklist-mimicking JSON endpoint, a machine scheduler reusing the OT/Dialysis conflict-guard pattern, and a split-screen report editor reusing the EMR's own `PatientHistoryPanel`). Two new RBAC roles: `PHLEBOTOMIST`, `RADIOLOGY_TECHNICIAN`.
+- [x] **Step 14** — Specialty EMRs & Medical Record Department, backend *and* frontend: IVF EMR (stimulation → retrieval → fertilization → transfer → beta-hCG, one document per cycle), Obstetric EMR (ANC visits plus a digital WHO-format Partograph with a hand-drawn SVG alert/action-line chart), and DMO shift-handover (SBAR-format, doctor-authored, criticality-ranked, deliberately its own model rather than an extension of the nurse-scoped `ShiftHandover`) — all under one `specialtyEmr.service.ts`, the same multi-model-one-service precedent `lims.service.ts` set. Medical Record Department: physical file custody (barcode check-in/check-out with full movement history), post-discharge ICD-10 coding finalization and its own pending-coding dashboard, and a legal/insurance/patient-copy request log. One new RBAC role: `MRD_EXECUTIVE`.

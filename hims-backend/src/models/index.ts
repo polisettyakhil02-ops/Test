@@ -68,3 +68,9 @@ export * from "./dialysis/DialysisSession.model.js";
 
 export * from "./radiology/RadiologyOrder.model.js";
 export * from "./radiology/RadiologyReport.model.js";
+
+export * from "./specialty_emr/IvfCycle.model.js";
+export * from "./specialty_emr/ObstetricRecord.model.js";
+export * from "./specialty_emr/DmoHandoverNote.model.js";
+
+export * from "./mrd/MedicalRecordArchive.model.js";
