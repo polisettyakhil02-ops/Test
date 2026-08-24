@@ -21,12 +21,8 @@ npm run dev              # http://localhost:5173, proxies /api to hims-backend o
 | `npm run preview` | Serves the production build locally |
 | `npm run typecheck` | `tsc -b --noEmit` |
 
-## Backend endpoints this app assumes exist
+## Backend endpoints
 
-Everything under `src/hooks/` calls a real `hims-backend` route from Step 3
-**except** the four auth endpoints and three smaller reads that Step 3 didn't
-build. Each is called from exactly one hook/file, marked with a
-`// BACKEND GAP:` comment, so `grep -rn "BACKEND GAP" src` finds the full list.
-Until they exist server-side, login and the features that depend on them
-(discharge, drug search in the prescription builder, the occupied-bed detail
-drawer) won't return real data.
+Every hook under `src/hooks/` calls a real, implemented `hims-backend` route
+— there are no remaining gaps. See `/ARCHITECTURE.md` at the repo root for
+the full endpoint-by-endpoint design record.

@@ -36,11 +36,6 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
  * token to decode (it's memory-only, never persisted), so it instead
  * rehydrates the session from the HTTP-only refresh cookie via
  * `GET /api/auth/me`.
- *
- * BACKEND GAP: POST /api/auth/login, POST /api/auth/logout, and
- * GET /api/auth/me don't exist yet in hims-backend (see the note in
- * src/types/auth.types.ts) — this context is written against their
- * intended contract so it starts working the moment those routes land.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);

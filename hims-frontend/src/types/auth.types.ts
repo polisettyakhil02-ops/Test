@@ -15,12 +15,7 @@ export interface LoginCredentials {
   password: string;
 }
 
-// BACKEND GAP: hims-backend does not yet implement POST /api/auth/login,
-// POST /api/auth/logout, POST /api/auth/refresh, or GET /api/auth/me.
-// Step 2 built the User model, bcrypt hashing, and JWT sign/verify utils
-// these would use; Step 3 flagged the login/refresh-rotation service as
-// not-yet-built. This is the assumed response contract those routes need
-// to satisfy for AuthContext (src/context/AuthContext.tsx) to work.
+/** Mirrors the response body hims-backend's POST /api/auth/login (Step 7) actually returns. */
 export interface LoginResponse {
   accessToken: string;
   user: AuthUser;

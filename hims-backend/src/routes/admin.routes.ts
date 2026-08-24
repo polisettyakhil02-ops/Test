@@ -40,4 +40,8 @@ router.patch("/beds/:bedId/status", auditLogger("WRITE", "Bed"), adminController
 // ---- Global Audit Inspector --------------------------------------------------
 router.get("/audit-logs", auditLogger("READ", "AuditLog"), adminController.listAuditLogsAdmin);
 
+// ---- Role & Permission Matrix ------------------------------------------------
+router.get("/roles", auditLogger("READ", "Role"), adminController.listRolesAdmin);
+router.put("/roles/:systemRole/permissions", auditLogger("WRITE", "Role"), adminController.updateRolePermissionsAdmin);
+
 export default router;

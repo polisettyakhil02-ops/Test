@@ -5,6 +5,7 @@ import { User, hashPassword, type UserDocument } from "../models/admin/User.mode
 import { StaffProfile } from "../models/admin/StaffProfile.model.js";
 import { Doctor } from "../models/opd/Doctor.model.js";
 import { Department } from "../models/admin/Department.model.js";
+import { Role, type PermissionGrant } from "../models/admin/Role.model.js";
 import { Patient, type PatientDocument } from "../models/mpi/Patient.model.js";
 import { Ward } from "../models/ipd/Ward.model.js";
 import { Bed } from "../models/ipd/Bed.model.js";
@@ -40,7 +41,8 @@ import type { Address, EmergencyContact } from "../types/common.types.js";
 import { generateEmployeeCode } from "../utils/sequenceGenerator.js";
 import { toObjectId } from "../utils/objectId.js";
 import { firstOrThrow } from "../utils/assert.js";
-import { NotFoundError, ConflictError, ValidationError } from "../utils/errors.js";
+import { NotFoundError, ConflictError, ValidationError, ForbiddenError } from "../utils/errors.js";
+import { invalidatePermissionCache } from "../middlewares/rbac.middleware.js";
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -789,4 +791,60 @@ export async function listAuditLogs(filters: AuditLogFilters) {
   ]);
 
   return { items, total };
+}
+
+/* ============================================================================
+ * Role & Permission Matrix
+ * ==========================================================================*/
+
+function formatRoleDisplayName(role: SystemRole): string {
+  return role
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
+ * Ensures every `SystemRole` has a `Role` document, auto-seeding one with
+ * an empty permission grant list the first time a role is seen — there's
+ * no separate seed script, so this is what makes the permission-matrix
+ * editor (`RoleManagement.tsx`) usable on a brand-new database — then
+ * returns them all.
+ */
+export async function listRoles() {
+  const existingRoles = new Set((await Role.distinct("systemRole")) as SystemRole[]);
+  const missing = Object.values(SystemRole).filter((role) => !existingRoles.has(role));
+
+  if (missing.length > 0) {
+    await Role.insertMany(
+      missing.map((role) => ({
+        systemRole: role,
+        displayName: formatRoleDisplayName(role),
+        permissions: [],
+        // SUPER_ADMIN bypasses both authorizeRoles and authorizePermission
+        // unconditionally (see rbac.middleware.ts) — its grants would be
+        // decorative at best and misleading at worst if left editable here.
+        isEditable: role !== SystemRole.SUPER_ADMIN,
+      })),
+      { ordered: false },
+    );
+  }
+
+  return Role.find().sort({ displayName: 1 });
+}
+
+export async function updateRolePermissions(systemRole: SystemRole, permissions: PermissionGrant[]) {
+  const role = await Role.findOne({ systemRole });
+  if (!role) throw new NotFoundError(`Role ${systemRole} not found`);
+  if (!role.isEditable) {
+    throw new ForbiddenError(`${role.displayName}'s permissions cannot be edited`);
+  }
+
+  role.permissions = permissions;
+  await role.save();
+  // Otherwise the next request for this role would keep serving the stale
+  // grants out of Redis for up to PERMISSION_CACHE_TTL_SECONDS.
+  await invalidatePermissionCache(systemRole);
+  return role;
 }

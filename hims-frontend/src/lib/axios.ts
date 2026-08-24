@@ -28,9 +28,7 @@ export function setOnAuthFailure(callback: () => void): void {
   onAuthFailure = callback;
 }
 
-// BACKEND GAP: POST /api/auth/refresh doesn't exist yet — see the note in
-// src/types/auth.types.ts. Uses a bare axios call (not `api`) so a failed
-// refresh can never recursively trigger this same response interceptor.
+/** Uses a bare axios call (not `api`) so a failed refresh can never recursively trigger this same response interceptor. */
 let refreshInFlight: Promise<string> | null = null;
 async function refreshAccessToken(): Promise<string> {
   if (!refreshInFlight) {

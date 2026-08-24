@@ -33,14 +33,16 @@ npm run dev             # tsx watch, http://localhost:4000
 | `npm run lint` | ESLint over `src/**/*.ts` |
 | `npm test` | Vitest |
 
-## Current state (Step 1 of the build roadmap)
+## Current state (Steps 1-16 complete)
 
-This checkpoint delivers the project scaffold, shared types, and the
-complete set of Mongoose schemas across all 11 domains (`src/models/`),
-plus the DB/Redis connection helpers including the `withTransaction`
-ACID-transaction wrapper (`src/config/database.ts`) that every billing,
-inventory, and bed-ADT service in later steps must use.
+Every domain in `/ARCHITECTURE.md` is fully implemented end to end: schemas
+(`src/models/`), services (`src/services/`), controllers/routes
+(`src/controllers/`, `src/routes/`), auth/RBAC middleware, the audit-logging
+interceptor, and the Docker/Nginx production deployment (`../docker/`,
+`../DEPLOYMENT.md`). See `/ARCHITECTURE.md` at the repo root for the full,
+step-by-step design record of every module.
 
-Not yet implemented (tracked for Steps 2-5): auth/RBAC middleware, the
-audit-logging interceptor, domain services, controllers/routes, the
-frontend app, and the Docker/Nginx production deployment.
+There's no public self-registration route — the very first admin user must
+be inserted directly into MongoDB before you can log in and create everyone
+else through the app. See the root `README.md`'s "Bootstrapping the first
+admin user" section for the exact steps.

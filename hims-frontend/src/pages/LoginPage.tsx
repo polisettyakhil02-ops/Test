@@ -14,12 +14,6 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-/**
- * BACKEND GAP: POST /api/auth/login doesn't exist yet — see the note in
- * src/types/auth.types.ts and src/context/AuthContext.tsx. This form is
- * fully wired to `useAuth().login`; it will work the moment that route
- * lands.
- */
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();

@@ -9,6 +9,7 @@ import {
   AuditAction,
   Gender,
   BloodGroup,
+  PermissionAction,
   PHONE_REGEX,
   EMAIL_REGEX,
 } from "../types/common.types.js";
@@ -392,6 +393,46 @@ export async function listAuditLogsAdmin(req: Request, res: Response, next: Next
       limit,
     });
     res.status(200).json({ data: items, meta: { page, limit, total, pageCount: Math.ceil(total / limit) } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/* ============================================================================
+ * Role & Permission Matrix
+ * ==========================================================================*/
+
+export async function listRolesAdmin(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const roles = await adminService.listRoles();
+    res.status(200).json({ data: roles });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const UpdateRolePermissionsSchema = z
+  .object({
+    permissions: z.array(
+      z.object({
+        resource: z.string().min(1),
+        actions: z.array(z.nativeEnum(PermissionAction)).min(1, "At least one action is required"),
+      }),
+    ),
+  })
+  .strict();
+
+export async function updateRolePermissionsAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { systemRole } = req.params;
+    if (!systemRole || !Object.values(SystemRole).includes(systemRole as SystemRole)) {
+      throw new ValidationError(`Invalid systemRole route parameter: "${systemRole}"`);
+    }
+    const parsed = UpdateRolePermissionsSchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(formatZodError(parsed.error));
+
+    const role = await adminService.updateRolePermissions(systemRole as SystemRole, parsed.data.permissions);
+    res.status(200).json({ data: role });
   } catch (err) {
     next(err);
   }
