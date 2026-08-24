@@ -25,6 +25,9 @@ import { ObstetricEmrPanel } from "@/pages/specialty_emr/ObstetricEmrPanel";
 import { DmoHandoverBoard } from "@/pages/specialty_emr/DmoHandoverBoard";
 import { MrdFileTracker } from "@/pages/mrd/MrdFileTracker";
 import { IcdCodingQueue } from "@/pages/mrd/IcdCodingQueue";
+import { ProcurementDashboard } from "@/pages/scm/ProcurementDashboard";
+import { AccountsPayable } from "@/pages/finance/AccountsPayable";
+import { ComplaintsBoard } from "@/pages/complaints/ComplaintsBoard";
 import { SystemRole } from "@/types/common.types";
 
 const IPD_ROLES = [
@@ -59,6 +62,16 @@ const SPECIALTY_EMR_ROLES = [
   SystemRole.STAFF_NURSE,
 ];
 const MRD_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.MRD_EXECUTIVE];
+const SCM_ROLES = [
+  SystemRole.SUPER_ADMIN,
+  SystemRole.HOSPITAL_ADMIN,
+  SystemRole.PROCUREMENT_OFFICER,
+  SystemRole.HEAD_NURSE,
+  SystemRole.STAFF_NURSE,
+  SystemRole.PHARMACIST,
+];
+const FINANCE_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.ACCOUNTS_EXECUTIVE];
+const COMPLAINTS_ROLES = [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.FACILITY_MANAGER, SystemRole.MAINTENANCE_STAFF];
 
 export default function App() {
   return (
@@ -117,6 +130,18 @@ export default function App() {
           <Route element={<ProtectedRoute roles={MRD_ROLES} />}>
             <Route path="mrd" element={<MrdFileTracker />} />
             <Route path="mrd/coding" element={<IcdCodingQueue />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={SCM_ROLES} />}>
+            <Route path="scm" element={<ProcurementDashboard />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={FINANCE_ROLES} />}>
+            <Route path="finance" element={<AccountsPayable />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={COMPLAINTS_ROLES} />}>
+            <Route path="complaints" element={<ComplaintsBoard />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

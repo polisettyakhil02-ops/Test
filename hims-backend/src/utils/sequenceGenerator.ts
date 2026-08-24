@@ -43,3 +43,8 @@ export const generateIvfCycleNumber = (): Promise<string> => generateSequenceNum
 export const generateObstetricRecordNumber = (): Promise<string> => generateSequenceNumber("OBS", "obstetricRecord");
 export const generateDmoHandoverNoteNumber = (): Promise<string> => generateSequenceNumber("DMO", "dmoHandoverNote");
 export const generateMrdArchiveNumber = (): Promise<string> => generateSequenceNumber("MRD", "mrdArchive");
+export const generateIndentNumber = (): Promise<string> => generateSequenceNumber("IND", "departmentIndent");
+export const generatePurchaseOrderNumber = (): Promise<string> => generateSequenceNumber("PO", "purchaseOrder");
+export const generateGrnNumber = (): Promise<string> => generateSequenceNumber("GRN", "goodsReceiptNote");
+export const generateExpenseNumber = (): Promise<string> => generateSequenceNumber("EXP", "expense");
+export const generateTicketNumber = (): Promise<string> => generateSequenceNumber("TKT", "ticket");

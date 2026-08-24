@@ -1,7 +1,10 @@
 import { Schema, model, type Model, type HydratedDocument, type Types } from "mongoose";
 import { PurchaseOrderStatus } from "../../types/common.types.js";
 
+/** Step 15 extension note: this model has existed since Step 1, but no service/controller/route ever wired it up — `SCMService` (services/scm.service.ts) is the first code that actually creates, submits, approves, and receives against a PurchaseOrder. */
+
 export interface PurchaseOrderLineItem {
+  _id: Types.ObjectId;
   drugId: Types.ObjectId;
   drugName: string;
   orderedQuantity: number;
@@ -16,8 +19,11 @@ export interface PurchaseOrderAttrs {
   lineItems: PurchaseOrderLineItem[];
   totalAmount: number;
   expectedDeliveryDate?: Date;
+  /** Optional traceability link back to the ward DepartmentIndent(s) this PO was raised to fulfill — a loose link (not a hard quantity reconciliation) so a single indent can be folded into a larger consolidated PO, or one indent split across several. */
+  sourceIndentIds: Types.ObjectId[];
   approvedByUserId?: string;
   approvedAt?: Date;
+  cancellationReason?: string;
   createdBy: string;
 }
 
@@ -50,8 +56,10 @@ const PurchaseOrderSchema = new Schema<PurchaseOrderAttrs>(
     },
     totalAmount: { type: Number, required: true, min: 0 },
     expectedDeliveryDate: { type: Date },
+    sourceIndentIds: { type: [Schema.Types.ObjectId], ref: "DepartmentIndent", default: [] },
     approvedByUserId: { type: String },
     approvedAt: { type: Date },
+    cancellationReason: { type: String, trim: true, maxlength: 500 },
     createdBy: { type: String, required: true },
   },
   { timestamps: true, collection: "purchase_orders" },

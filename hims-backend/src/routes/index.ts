@@ -18,6 +18,9 @@ import phlebotomyRoutes from "./phlebotomy.routes.js";
 import radiologyRoutes from "./radiology.routes.js";
 import specialtyEmrRoutes from "./specialtyEmr.routes.js";
 import mrdRoutes from "./mrd.routes.js";
+import scmRoutes from "./scm.routes.js";
+import financeRoutes from "./finance.routes.js";
+import complaintsRoutes from "./complaints.routes.js";
 
 /**
  * Main API router, mounted at "/api" by `app.ts`. `patientRoutes` spans
@@ -46,5 +49,8 @@ router.use("/phlebotomy", phlebotomyRoutes);
 router.use("/radiology", radiologyRoutes);
 router.use("/specialty-emr", specialtyEmrRoutes);
 router.use("/mrd", mrdRoutes);
+router.use("/scm", scmRoutes);
+router.use("/finance", financeRoutes);
+router.use("/complaints", complaintsRoutes);
 
 export default router;

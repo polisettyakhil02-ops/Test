@@ -55,6 +55,14 @@ export enum SystemRole {
   RADIOLOGY_TECHNICIAN = "RADIOLOGY_TECHNICIAN",
   /** Step 14: Medical Record Department — physical file custody, ICD-10 coding finalization, legal/insurance record requests. Doctors already cover every Specialty EMR (IVF/Obstetric/DMO) writer role, so this is the only new role Step 14 needs. */
   MRD_EXECUTIVE = "MRD_EXECUTIVE",
+  /** Step 15: the procurement desk — indent review, PO issuance/approval, GRN verification and posting. */
+  PROCUREMENT_OFFICER = "PROCUREMENT_OFFICER",
+  /** Step 15: Accounts Payable — logging non-patient OPEX and marking vendor invoices paid. */
+  ACCOUNTS_EXECUTIVE = "ACCOUNTS_EXECUTIVE",
+  /** Step 15: owns the complaint/ticket Kanban board — assigns tickets and tracks resolution. */
+  FACILITY_MANAGER = "FACILITY_MANAGER",
+  /** Step 15: the line staff a Facility Maintenance ticket actually gets assigned to. */
+  MAINTENANCE_STAFF = "MAINTENANCE_STAFF",
 }
 
 export enum PermissionAction {
@@ -592,6 +600,65 @@ export enum MrdFileRequestStatus {
   PENDING = "PENDING",
   FULFILLED = "FULFILLED",
   DENIED = "DENIED",
+}
+
+/* ============================================================================
+ * Step 15 — Corporate Back-Office & Supply Chain: Procurement/SCM, Finance
+ * & Expenses, Complaint Management.
+ * ==========================================================================*/
+
+export enum DepartmentIndentStatus {
+  PENDING = "PENDING",
+  APPROVED = "APPROVED",
+  PARTIALLY_APPROVED = "PARTIALLY_APPROVED",
+  REJECTED = "REJECTED",
+  FULFILLED = "FULFILLED",
+}
+
+export enum GrnStatus {
+  PENDING_VERIFICATION = "PENDING_VERIFICATION",
+  VERIFIED = "VERIFIED",
+  POSTED = "POSTED",
+}
+
+export enum ExpenseCategory {
+  UTILITIES = "UTILITIES",
+  MAINTENANCE = "MAINTENANCE",
+  VENDOR_PAYMENT = "VENDOR_PAYMENT",
+  SUPPLIES = "SUPPLIES",
+  STAFF_WELFARE = "STAFF_WELFARE",
+  PROFESSIONAL_SERVICES = "PROFESSIONAL_SERVICES",
+  OTHER = "OTHER",
+}
+
+export enum ExpensePaymentStatus {
+  PENDING = "PENDING",
+  PAID = "PAID",
+}
+
+export enum TicketCategory {
+  FACILITY_MAINTENANCE = "FACILITY_MAINTENANCE",
+  PATIENT_GRIEVANCE = "PATIENT_GRIEVANCE",
+  HOUSEKEEPING = "HOUSEKEEPING",
+  IT_SUPPORT = "IT_SUPPORT",
+  OTHER = "OTHER",
+}
+
+/** Facility/complaint urgency — kept distinct from the clinical `LabOrderPriority` (STAT/URGENT/ROUTINE) vocabulary; a broken ICU AC unit and a lab specimen don't share a triage scale. */
+export enum TicketPriority {
+  LOW = "LOW",
+  MEDIUM = "MEDIUM",
+  HIGH = "HIGH",
+  CRITICAL = "CRITICAL",
+}
+
+/** The Kanban board's columns, in workflow order. */
+export enum TicketStatus {
+  OPEN = "OPEN",
+  ASSIGNED = "ASSIGNED",
+  IN_PROGRESS = "IN_PROGRESS",
+  RESOLVED = "RESOLVED",
+  CLOSED = "CLOSED",
 }
 
 export const ICD10_CODE_REGEX = /^[A-TV-Z][0-9][0-9AB](\.[0-9A-TV-Z]{1,4})?$/;

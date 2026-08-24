@@ -120,6 +120,31 @@ export const NAV_ITEMS: NavItem[] = [
     roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.MRD_EXECUTIVE],
   },
   {
+    label: "Procurement Dashboard",
+    path: "/scm",
+    icon: "📦",
+    roles: [
+      SystemRole.SUPER_ADMIN,
+      SystemRole.HOSPITAL_ADMIN,
+      SystemRole.PROCUREMENT_OFFICER,
+      SystemRole.HEAD_NURSE,
+      SystemRole.STAFF_NURSE,
+      SystemRole.PHARMACIST,
+    ],
+  },
+  {
+    label: "Accounts Payable",
+    path: "/finance",
+    icon: "💳",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.ACCOUNTS_EXECUTIVE],
+  },
+  {
+    label: "Complaints Board",
+    path: "/complaints",
+    icon: "🛠",
+    roles: [SystemRole.SUPER_ADMIN, SystemRole.HOSPITAL_ADMIN, SystemRole.FACILITY_MANAGER, SystemRole.MAINTENANCE_STAFF],
+  },
+  {
     label: "Admin Console",
     path: "/admin",
     icon: "⚙",

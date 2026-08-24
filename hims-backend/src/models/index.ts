@@ -74,3 +74,10 @@ export * from "./specialty_emr/ObstetricRecord.model.js";
 export * from "./specialty_emr/DmoHandoverNote.model.js";
 
 export * from "./mrd/MedicalRecordArchive.model.js";
+
+export * from "./scm/DepartmentIndent.model.js";
+export * from "./scm/GoodsReceiptNote.model.js";
+
+export * from "./finance/Expense.model.js";
+
+export * from "./complaints/Ticket.model.js";

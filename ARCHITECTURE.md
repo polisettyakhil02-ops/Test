@@ -1,4 +1,4 @@
-# HIMS Platform — Architecture Blueprint (Steps 1-14)
+# HIMS Platform — Architecture Blueprint (Steps 1-15)
 
 A production-grade Hospital Information Management System living in this
 repository alongside the pre-existing, unrelated "Ask the ERP" app
@@ -400,7 +400,7 @@ spirit as the established flat convention instead.
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
-## Step 14 deliverables — Specialty EMRs & Medical Record Department (this checkpoint)
+## Step 14 deliverables — Specialty EMRs & Medical Record Department
 
 IVF/Obstetric/DMO Specialty EMRs, and the Medical Record Department (MRD) —
 backend and frontend both. Same directory-convention note as every Step
@@ -431,6 +431,38 @@ separate `mrd.service.ts`/`.controller.ts`/`.routes.ts`).
 
 Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
 
+## Step 15 deliverables — Corporate Back-Office & Supply Chain (this checkpoint)
+
+Procurement/SCM, Finance & Expenses, and Complaint Management — backend and
+frontend both. Same directory-convention note as every Step since 11: the
+request's `src/modules/scm/`/`src/modules/finance/`/`src/modules/complaints/`
+paths are followed in spirit as the established flat convention instead.
+
+**Purchase & SCM — `models/scm/`, `services/scm.service.ts`, `pages/scm/`:**
+
+- `PurchaseOrder` and `Supplier` have existed since Step 1 with no service ever driving them — the same "schema with no service" gap Steps 8/9/11 each closed for a different domain. `SCMService` is the first code to create, submit, approve, and receive against a PO.
+- `DepartmentIndent` (new) is the demand side — a ward's request for supplies — kept distinct from `PurchaseOrder` (the vendor-facing supply side); `priority` reuses `LabOrderPriority` (STAT/URGENT/ROUTINE), since a ward out of syringes right now has the same three-tier urgency a STAT lab order does.
+- `GoodsReceiptNote` (new) walks `PENDING_VERIFICATION` → `VERIFIED` → `POSTED`. Splitting "verified" from "posted" is deliberate — a supervisor confirming the paperwork matches the delivery is a different moment from the stock actually becoming dispensable, and the request specifically asked for a transaction keyed off a *verified* GRN. `postGrnToStock` is that transaction: one new `DrugBatch` + one `StockTransaction` (`PURCHASE_RECEIPT`) per GRN line, the owning PO's `lineItems[].receivedQuantity`/status advanced, and the GRN flipped to `POSTED`, all inside one `withTransaction` call.
+- `getLowStockDrugs` aggregates on-hand `DrugBatch.quantityOnHand` per drug against `Drug.reorderLevel` — the Procurement Dashboard's "auto-generate PO" data source; the actual PO is still created through the normal `createPurchaseOrder` call, prefilled client-side from that list rather than a separate rigid "auto-PO" code path.
+- **Frontend** — `ProcurementDashboard.tsx`: tabs across `IndentsPanel.tsx` (raise/review indents), `LowStockPurchaseOrders.tsx` (low-stock alerts → prefilled PO, plus the full PO list with submit/approve/cancel), and `GrnProcessingPanel.tsx` (log a GRN against an approved PO, verify, post to stock).
+
+**Finance & Expenses — `models/finance/Expense.model.ts`, `services/finance.service.ts`, `pages/finance/AccountsPayable.tsx`:**
+
+- `Expense` is deliberately separate from `Invoice`/`Payment` (patient-revenue-facing since Step 1) — this is OPEX, the mirror-image expense side Accounts Payable actually works from. `paymentMode` reuses the existing `PaymentMode` enum.
+- Single-document writes throughout (`logExpense`, `markExpensePaid`) — no `withTransaction` needed, the same reasoning documented on every other single-collection service in this codebase.
+- **Frontend** — a pending/paid filter, a log-expense form with a local file picker that stores a stable reference key (`invoiceDocumentKey`, the same convention as `DischargeSummary.pdfStorageKey`) rather than actually uploading bytes, since no object-storage backend exists in this build.
+
+**Complaint Management — `models/complaints/Ticket.model.ts`, `services/complaints.service.ts`, `pages/complaints/ComplaintsBoard.tsx`:**
+
+- One `Ticket` model covers both requested categories (`FACILITY_MAINTENANCE`, `PATIENT_GRIEVANCE`) plus `HOUSEKEEPING`/`IT_SUPPORT`/`OTHER` — they share one assign/track/resolve lifecycle, so a parallel model per category would just be the same state machine twice.
+- `TicketPriority` (LOW/MEDIUM/HIGH/CRITICAL) is a new enum, deliberately not a reuse of the clinical `LabOrderPriority` — a broken ICU AC and a lab specimen don't belong on the same triage scale.
+- `resolveTicket` stamps `resolutionMinutes` once, at resolve time, computed off `ticket._id.getTimestamp()` (the ObjectId's own embedded creation time — `TicketAttrs` doesn't declare `createdAt`, the same convention noted on `Specimen` in Step 13) rather than always recomputing from `resolvedAt - createdAt`, so resolution-time reporting has a stable historical number.
+- **Frontend** — `ComplaintsBoard.tsx`: a five-column Kanban (Open/Assigned/In Progress/Resolved/Closed) where cards move via explicit action buttons (not drag-and-drop), so every transition still goes through the same server-side validation a direct API call would.
+
+**New RBAC roles:** `PROCUREMENT_OFFICER`, `ACCOUNTS_EXECUTIVE`, `FACILITY_MANAGER`, `MAINTENANCE_STAFF`. `scm.routes.ts` and `complaints.routes.ts` each use one wide shared gate spanning every persona that desk actually serves (ward staff *and* procurement; any staff role *and* the facility team) — the same wide-shared-gate pattern `emergency.routes.ts` already established for a multi-persona desk.
+
+Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc -b`, `vite build`) verify clean.
+
 ## Roadmap status
 
 - [x] **Step 1** — Architecture blueprint, folder structure, all Mongoose schemas/TS interfaces
@@ -447,3 +479,4 @@ Both `hims-backend` (`tsc --noEmit`, `npm run build`) and `hims-frontend` (`tsc 
 - [x] **Step 12** — High-Acuity & Specialized Clinical Modules, backend *and* frontend: Emergency/ER (triage board, ABCDE Emergency EMR, one-click ER→IPD admission as a single ACID transaction), Blood Bank (donor/bag/cross-match, with a dispense guard that rejects an unmatched or expired unit in code), and Dialysis/Nephrology (machine-conflict-checked scheduler + post-dialysis chart, reusing the Step 11 biomedical `Asset` registry for machines). Three new RBAC roles: `ER_NURSE`, `BLOOD_BANK_TECHNICIAN`, `DIALYSIS_TECHNICIAN`.
 - [x] **Step 13** — Advanced Diagnostics & Sample Collection, backend *and* frontend: Phlebotomy & Queue Management (no new schema — closes the barcode-collection gate on the existing Step 8 `Specimen`/`LabOrder` state machine, adding `LIMSService.receiveSpecimen` and a hard `submitLabResult` guard, plus a TV waiting-room board and a technician print/scan station) and Radiology & RIS (`RadiologyOrder`/`RadiologyReport`, a DICOM-Modality-Worklist-mimicking JSON endpoint, a machine scheduler reusing the OT/Dialysis conflict-guard pattern, and a split-screen report editor reusing the EMR's own `PatientHistoryPanel`). Two new RBAC roles: `PHLEBOTOMIST`, `RADIOLOGY_TECHNICIAN`.
 - [x] **Step 14** — Specialty EMRs & Medical Record Department, backend *and* frontend: IVF EMR (stimulation → retrieval → fertilization → transfer → beta-hCG, one document per cycle), Obstetric EMR (ANC visits plus a digital WHO-format Partograph with a hand-drawn SVG alert/action-line chart), and DMO shift-handover (SBAR-format, doctor-authored, criticality-ranked, deliberately its own model rather than an extension of the nurse-scoped `ShiftHandover`) — all under one `specialtyEmr.service.ts`, the same multi-model-one-service precedent `lims.service.ts` set. Medical Record Department: physical file custody (barcode check-in/check-out with full movement history), post-discharge ICD-10 coding finalization and its own pending-coding dashboard, and a legal/insurance/patient-copy request log. One new RBAC role: `MRD_EXECUTIVE`.
+- [x] **Step 15** — Corporate Back-Office & Supply Chain, backend *and* frontend: Procurement/SCM (`DepartmentIndent` demand-side requests, finally wiring up Step 1's dormant `PurchaseOrder`/`Supplier` models, and a new `GoodsReceiptNote` whose `postGrnToStock` is the step's ACID showcase — a verified GRN becoming real `DrugBatch`/`StockTransaction` ledger entries in one transaction), Finance & Expenses (`Expense` — the OPEX mirror of the patient-facing `Invoice`/`Payment` domain, with an Accounts Payable UI including a vendor-invoice file picker), and Complaint Management (`Ticket` covering both Facility Maintenance and Patient Grievance on one assign/track/resolve lifecycle, with a five-column Kanban board and stamped `resolutionMinutes`). Four new RBAC roles: `PROCUREMENT_OFFICER`, `ACCOUNTS_EXECUTIVE`, `FACILITY_MANAGER`, `MAINTENANCE_STAFF`.

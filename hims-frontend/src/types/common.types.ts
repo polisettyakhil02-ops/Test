@@ -27,6 +27,10 @@ export const SystemRole = {
   PHLEBOTOMIST: "PHLEBOTOMIST",
   RADIOLOGY_TECHNICIAN: "RADIOLOGY_TECHNICIAN",
   MRD_EXECUTIVE: "MRD_EXECUTIVE",
+  PROCUREMENT_OFFICER: "PROCUREMENT_OFFICER",
+  ACCOUNTS_EXECUTIVE: "ACCOUNTS_EXECUTIVE",
+  FACILITY_MANAGER: "FACILITY_MANAGER",
+  MAINTENANCE_STAFF: "MAINTENANCE_STAFF",
 } as const;
 export type SystemRole = (typeof SystemRole)[keyof typeof SystemRole];
 
@@ -426,6 +430,82 @@ export type MrdFileRequestType = (typeof MrdFileRequestType)[keyof typeof MrdFil
 
 export const MrdFileRequestStatus = { PENDING: "PENDING", FULFILLED: "FULFILLED", DENIED: "DENIED" } as const;
 export type MrdFileRequestStatus = (typeof MrdFileRequestStatus)[keyof typeof MrdFileRequestStatus];
+
+/* ============================================================================
+ * Step 15 — Corporate Back-Office & Supply Chain: Procurement/SCM, Finance
+ * & Expenses, Complaint Management. First frontend mirror of
+ * `PurchaseOrderStatus`/`StockTransactionType` (the models are Step 1's,
+ * but Step 15 is the first UI to touch them).
+ * ==========================================================================*/
+
+export const PurchaseOrderStatus = {
+  DRAFT: "DRAFT",
+  SUBMITTED: "SUBMITTED",
+  APPROVED: "APPROVED",
+  PARTIALLY_RECEIVED: "PARTIALLY_RECEIVED",
+  RECEIVED: "RECEIVED",
+  CANCELLED: "CANCELLED",
+} as const;
+export type PurchaseOrderStatus = (typeof PurchaseOrderStatus)[keyof typeof PurchaseOrderStatus];
+
+export const StockTransactionType = {
+  PURCHASE_RECEIPT: "PURCHASE_RECEIPT",
+  DISPENSATION: "DISPENSATION",
+  RETURN_TO_STOCK: "RETURN_TO_STOCK",
+  RETURN_TO_SUPPLIER: "RETURN_TO_SUPPLIER",
+  ADJUSTMENT: "ADJUSTMENT",
+  TRANSFER: "TRANSFER",
+  EXPIRY_WRITE_OFF: "EXPIRY_WRITE_OFF",
+  DAMAGE_WRITE_OFF: "DAMAGE_WRITE_OFF",
+} as const;
+export type StockTransactionType = (typeof StockTransactionType)[keyof typeof StockTransactionType];
+
+export const DepartmentIndentStatus = {
+  PENDING: "PENDING",
+  APPROVED: "APPROVED",
+  PARTIALLY_APPROVED: "PARTIALLY_APPROVED",
+  REJECTED: "REJECTED",
+  FULFILLED: "FULFILLED",
+} as const;
+export type DepartmentIndentStatus = (typeof DepartmentIndentStatus)[keyof typeof DepartmentIndentStatus];
+
+export const GrnStatus = { PENDING_VERIFICATION: "PENDING_VERIFICATION", VERIFIED: "VERIFIED", POSTED: "POSTED" } as const;
+export type GrnStatus = (typeof GrnStatus)[keyof typeof GrnStatus];
+
+export const ExpenseCategory = {
+  UTILITIES: "UTILITIES",
+  MAINTENANCE: "MAINTENANCE",
+  VENDOR_PAYMENT: "VENDOR_PAYMENT",
+  SUPPLIES: "SUPPLIES",
+  STAFF_WELFARE: "STAFF_WELFARE",
+  PROFESSIONAL_SERVICES: "PROFESSIONAL_SERVICES",
+  OTHER: "OTHER",
+} as const;
+export type ExpenseCategory = (typeof ExpenseCategory)[keyof typeof ExpenseCategory];
+
+export const ExpensePaymentStatus = { PENDING: "PENDING", PAID: "PAID" } as const;
+export type ExpensePaymentStatus = (typeof ExpensePaymentStatus)[keyof typeof ExpensePaymentStatus];
+
+export const TicketCategory = {
+  FACILITY_MAINTENANCE: "FACILITY_MAINTENANCE",
+  PATIENT_GRIEVANCE: "PATIENT_GRIEVANCE",
+  HOUSEKEEPING: "HOUSEKEEPING",
+  IT_SUPPORT: "IT_SUPPORT",
+  OTHER: "OTHER",
+} as const;
+export type TicketCategory = (typeof TicketCategory)[keyof typeof TicketCategory];
+
+export const TicketPriority = { LOW: "LOW", MEDIUM: "MEDIUM", HIGH: "HIGH", CRITICAL: "CRITICAL" } as const;
+export type TicketPriority = (typeof TicketPriority)[keyof typeof TicketPriority];
+
+export const TicketStatus = {
+  OPEN: "OPEN",
+  ASSIGNED: "ASSIGNED",
+  IN_PROGRESS: "IN_PROGRESS",
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED",
+} as const;
+export type TicketStatus = (typeof TicketStatus)[keyof typeof TicketStatus];
 
 /** Every API response's envelope shape (see hims-backend controllers: `res.json({ data: ... })`). */
 export interface ApiEnvelope<T> {
