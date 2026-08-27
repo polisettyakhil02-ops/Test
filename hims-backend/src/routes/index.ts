@@ -1,0 +1,60 @@
+import { Router } from "express";
+import authRoutes from "./auth.routes.js";
+import patientRoutes from "./patient.routes.js";
+import ipdRoutes from "./ipd.routes.js";
+import emrRoutes from "./emr.routes.js";
+import pharmacyRoutes from "./pharmacy.routes.js";
+import billingRoutes from "./billing.routes.js";
+import adminRoutes from "./admin.routes.js";
+import limsRoutes from "./lims.routes.js";
+import otRoutes from "./ot.routes.js";
+import assetRoutes from "./asset.routes.js";
+import payrollRoutes from "./payroll.routes.js";
+import insuranceRoutes from "./insurance.routes.js";
+import emergencyRoutes from "./emergency.routes.js";
+import bloodbankRoutes from "./bloodbank.routes.js";
+import dialysisRoutes from "./dialysis.routes.js";
+import phlebotomyRoutes from "./phlebotomy.routes.js";
+import radiologyRoutes from "./radiology.routes.js";
+import specialtyEmrRoutes from "./specialtyEmr.routes.js";
+import mrdRoutes from "./mrd.routes.js";
+import scmRoutes from "./scm.routes.js";
+import financeRoutes from "./finance.routes.js";
+import complaintsRoutes from "./complaints.routes.js";
+import analyticsRoutes from "./analytics.routes.js";
+import mobileRoutes from "./mobile.routes.js";
+
+/**
+ * Main API router, mounted at "/api" by `app.ts`. `patientRoutes` spans
+ * two resource prefixes ("/patients" and "/appointments" — see its own
+ * file for why) and so declares its own full paths; every other domain
+ * router is mounted here under its natural "/<domain>" prefix.
+ */
+const router = Router();
+
+router.use("/auth", authRoutes);
+router.use(patientRoutes);
+router.use("/ipd", ipdRoutes);
+router.use("/emr", emrRoutes);
+router.use("/pharmacy", pharmacyRoutes);
+router.use("/billing", billingRoutes);
+router.use("/admin", adminRoutes);
+router.use("/lims", limsRoutes);
+router.use("/ot", otRoutes);
+router.use("/assets", assetRoutes);
+router.use("/payroll", payrollRoutes);
+router.use("/insurance", insuranceRoutes);
+router.use("/emergency", emergencyRoutes);
+router.use("/bloodbank", bloodbankRoutes);
+router.use("/dialysis", dialysisRoutes);
+router.use("/phlebotomy", phlebotomyRoutes);
+router.use("/radiology", radiologyRoutes);
+router.use("/specialty-emr", specialtyEmrRoutes);
+router.use("/mrd", mrdRoutes);
+router.use("/scm", scmRoutes);
+router.use("/finance", financeRoutes);
+router.use("/complaints", complaintsRoutes);
+router.use("/analytics", analyticsRoutes);
+router.use("/mobile", mobileRoutes);
+
+export default router;

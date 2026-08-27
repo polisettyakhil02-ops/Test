@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1
+#
+# Multi-stage build for hims-backend. Build with the repo root as context
+# (docker-compose.prod.yml sets `context: ..`, `dockerfile: docker/Dockerfile.server`)
+# since it needs nothing outside hims-backend/, but that context makes the
+# COPY paths below unambiguous regardless of which directory `docker build`
+# is invoked from.
+
+########################################
+# 1. deps — install once, reused by both the build stage and (pruned) prod
+########################################
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY hims-backend/package.json hims-backend/package-lock.json ./
+RUN npm ci
+
+########################################
+# 2. build — compile TypeScript -> dist/
+########################################
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY hims-backend/ ./
+RUN npm run build
+
+########################################
+# 3. production — only prod deps + compiled output, run as non-root
+########################################
+FROM node:20-alpine AS production
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Alpine's node images don't ship a dedicated app user by default — create
+# one with a fixed, non-privileged uid/gid so it's stable across rebuilds
+# (matters if a volume ever needs matching ownership).
+RUN addgroup -g 10001 -S hims && adduser -u 10001 -S hims -G hims
+
+COPY hims-backend/package.json hims-backend/package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY --from=build /app/dist ./dist
+
+USER hims
+EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:4000/healthz',(res)=>{process.exit(res.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
+
+CMD ["node", "dist/server.js"]

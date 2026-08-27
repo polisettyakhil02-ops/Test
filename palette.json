@@ -1,0 +1,62 @@
+{
+  "brand": {
+    "50": "#eff6ff",
+    "100": "#dbeafe",
+    "500": "#2563eb",
+    "600": "#1d4ed8",
+    "700": "#1e40af"
+  },
+  "neutral": {
+    "slate-50": "#f8fafc",
+    "slate-100": "#f1f5f9",
+    "slate-200": "#e2e8f0",
+    "slate-300": "#cbd5e1",
+    "slate-400": "#94a3b8",
+    "slate-500": "#64748b",
+    "slate-600": "#475569",
+    "slate-700": "#334155",
+    "slate-900": "#0f172a",
+    "slate-950": "#020617"
+  },
+  "badgeTones": {
+    "green": { "bg": "#d1fae5", "text": "#065f46" },
+    "blue": { "bg": "#dbeafe", "text": "#1e40af" },
+    "red": { "bg": "#fee2e2", "text": "#991b1b" },
+    "yellow": { "bg": "#fef3c7", "text": "#92400e" },
+    "gray": { "bg": "#f1f5f9", "text": "#334155" },
+    "purple": { "bg": "#f3e8ff", "text": "#6b21a8" }
+  },
+  "buttonVariants": {
+    "primary": { "bg": "#1d4ed8", "hover": "#1e40af", "text": "#ffffff" },
+    "secondary": { "bg": "#f1f5f9", "hover": "#e2e8f0", "text": "#0f172a" },
+    "danger": { "bg": "#dc2626", "hover": "#b91c1c", "text": "#ffffff" },
+    "ghost": { "bg": "transparent", "hover": "#f1f5f9", "text": "#334155" },
+    "outline": { "bg": "#ffffff", "hover": "#f8fafc", "text": "#334155", "border": "#cbd5e1" }
+  },
+  "triage": {
+    "red": { "header": "#dc2626", "cardBg": "#fef2f2", "cardBorder": "#f87171" },
+    "yellow": { "header": "#f59e0b", "cardBg": "#fffbeb", "cardBorder": "#fbbf24" },
+    "green": { "header": "#059669", "cardBg": "#ecfdf5", "cardBorder": "#34d399" },
+    "black": { "header": "#0f172a", "cardBg": "#f1f5f9", "cardBorder": "#64748b" }
+  },
+  "clinicalCharts": {
+    "partographAlertLine": "#f59e0b",
+    "partographActionLine": "#dc2626",
+    "partographDilation": "#2563eb",
+    "growthWeight": "#2563eb",
+    "growthHeight": "#059669",
+    "growthHeadCircumference": "#d97706"
+  },
+  "controlTowerDark": {
+    "background": "#020617",
+    "panel": "rgba(15, 23, 42, 0.6)",
+    "panelBorder": "#1e293b",
+    "tooltipBg": "#0f172a",
+    "bodyText": "#f1f5f9",
+    "axisText": "#64748b",
+    "accent": "#38bdf8",
+    "good": "#34d399",
+    "warn": "#fbbf24",
+    "bad": "#f87171"
+  }
+}

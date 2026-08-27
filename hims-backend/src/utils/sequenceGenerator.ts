@@ -1,0 +1,51 @@
+import { redis } from "../config/redis.js";
+
+/**
+ * Shared human-readable document-number generator, e.g. "INV-2026-000042".
+ * Backed by a Redis `INCR` per (counterName, year) so concurrent requests
+ * across multiple API instances never collide, without a round trip to
+ * Mongo or a dedicated counter collection. Mirrors the pattern already
+ * used by `generateUHID()` in models/mpi/Patient.model.ts.
+ */
+export async function generateSequenceNumber(
+  prefix: string,
+  counterName: string,
+  padLength = 6,
+): Promise<string> {
+  const year = new Date().getFullYear();
+  const key = `seq:${counterName}:${year}`;
+  const sequence = await redis.incr(key);
+  return `${prefix}-${year}-${sequence.toString().padStart(padLength, "0")}`;
+}
+
+export const generateInvoiceNumber = (): Promise<string> => generateSequenceNumber("INV", "invoice");
+export const generateDispensationNumber = (): Promise<string> => generateSequenceNumber("DISP", "dispensation");
+export const generateAdmissionNumber = (): Promise<string> => generateSequenceNumber("IPD", "admission");
+export const generateVisitNumber = (): Promise<string> => generateSequenceNumber("OPD", "opdVisit");
+export const generatePrescriptionNumber = (): Promise<string> => generateSequenceNumber("RX", "prescription");
+export const generateReceiptNumber = (): Promise<string> => generateSequenceNumber("RCPT", "payment");
+export const generateEmployeeCode = (): Promise<string> => generateSequenceNumber("EMP", "staff", 5);
+export const generateLabOrderNumber = (): Promise<string> => generateSequenceNumber("LAB", "labOrder");
+export const generateSpecimenBarcode = (): Promise<string> => generateSequenceNumber("SPEC", "specimen");
+export const generateSurgeryNumber = (): Promise<string> => generateSequenceNumber("OT", "surgery");
+export const generateSterilizationCycleNumber = (): Promise<string> => generateSequenceNumber("STZ", "sterilization");
+export const generateAssetCode = (): Promise<string> => generateSequenceNumber("BME", "asset", 5);
+export const generateMaintenanceTicketNumber = (): Promise<string> => generateSequenceNumber("MT", "maintenanceTicket");
+export const generatePayoutStatementNumber = (): Promise<string> => generateSequenceNumber("PAY", "payoutStatement");
+export const generatePreAuthNumber = (): Promise<string> => generateSequenceNumber("PA", "preAuth");
+export const generateErVisitNumber = (): Promise<string> => generateSequenceNumber("ER", "erVisit");
+export const generateDonorCode = (): Promise<string> => generateSequenceNumber("DON", "bloodDonor", 6);
+export const generateBloodBagNumber = (): Promise<string> => generateSequenceNumber("BAG", "bloodBag");
+export const generateCrossMatchRequestNumber = (): Promise<string> => generateSequenceNumber("XM", "crossMatchRequest");
+export const generateDialysisSessionNumber = (): Promise<string> => generateSequenceNumber("DLS", "dialysisSession");
+export const generateRadiologyOrderNumber = (): Promise<string> => generateSequenceNumber("RAD", "radiologyOrder");
+export const generateIvfCycleNumber = (): Promise<string> => generateSequenceNumber("IVF", "ivfCycle");
+export const generateObstetricRecordNumber = (): Promise<string> => generateSequenceNumber("OBS", "obstetricRecord");
+export const generatePediatricRecordNumber = (): Promise<string> => generateSequenceNumber("PED", "pediatricRecord");
+export const generateDmoHandoverNoteNumber = (): Promise<string> => generateSequenceNumber("DMO", "dmoHandoverNote");
+export const generateMrdArchiveNumber = (): Promise<string> => generateSequenceNumber("MRD", "mrdArchive");
+export const generateIndentNumber = (): Promise<string> => generateSequenceNumber("IND", "departmentIndent");
+export const generatePurchaseOrderNumber = (): Promise<string> => generateSequenceNumber("PO", "purchaseOrder");
+export const generateGrnNumber = (): Promise<string> => generateSequenceNumber("GRN", "goodsReceiptNote");
+export const generateExpenseNumber = (): Promise<string> => generateSequenceNumber("EXP", "expense");
+export const generateTicketNumber = (): Promise<string> => generateSequenceNumber("TKT", "ticket");
